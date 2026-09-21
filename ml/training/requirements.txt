@@ -1,0 +1,16 @@
+# Resolved and smoke-tested on macOS arm64 / Python 3.13 (conda env `gist`).
+# transformers 5.x renamed two things this code depends on: `torch_dtype` -> `dtype` on
+# from_pretrained, and TrainingArguments dropped `warmup_ratio` for `warmup_steps`.
+# Do not relax the transformers pin below 5.x without reverting those.
+torch==2.14.0
+transformers==5.17.0
+peft==0.21.0
+accelerate==1.15.0
+datasets==5.0.1
+wandb==0.30.0
+pyyaml==6.0.3
+numpy==2.5.3
+
+# CUDA-only. Absent on Mac, so local runs fall back to full-precision LoRA (see train.py).
+# Unverified locally for that reason - confirm on the first GPU run.
+bitsandbytes==0.50.2 ; platform_system == "Linux"

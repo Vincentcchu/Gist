@@ -1,5 +1,23 @@
 app/venv/
 app/local.db
+scraper/.browser_profile/
 __pycache__/
 *.pyc
 .DS_Store
+.env
+
+ml/data/cache/
+ml/outputs/
+*.safetensors
+wandb/
+
+# Datasets stay out of git. ml/data/raw/README.md documents the schema and provenance;
+# prepare_dataset.py regenerates every split from the raw file deterministically.
+ml/data/**/*.jsonl
+
+# Scraper debugging scratch - page dumps and a CAPTCHA screenshot. The findings they
+# produced are written up in scraper/README.md, which is the part worth keeping.
+scraper/*.html
+scraper/debug_screenshot.png
+
+.vscode/

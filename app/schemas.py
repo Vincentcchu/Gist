@@ -7,7 +7,8 @@ class ReviewOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: int
-    hotel_id: int
+    venue_id: int
+    external_id: str | None
     raw_text: str
     source: str
     scraped_at: datetime

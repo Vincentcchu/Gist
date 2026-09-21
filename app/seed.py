@@ -3,7 +3,7 @@ from datetime import UTC, datetime, timedelta
 import db
 import models
 
-# Each entry: (hotel_index, review_text, source, days_ago, status, aspects)
+# Each entry: (venue_index, review_text, source, days_ago, status, aspects)
 # aspects: list of (aspect_text, sentiment, span) or [] for reviews left
 # "pending" to preview the pre-labeling state.
 REVIEWS = [
@@ -79,9 +79,34 @@ REVIEWS = [
         "manual-seed", 2, "pending", []),
 ]
 
-HOTELS = [
+VENUES = [
     ("Harbourview Grand", "Hong Kong"),
     ("Central Boutique Inn", "Hong Kong"),
+]
+
+# Real restaurant targeted by the Phase 2 scraper (scraper/scrape_reviews.py).
+# No fake reviews are seeded for this one - the scraper populates it.
+# NOTE: source_url is the overview page, not /reviews directly - a hard
+# page load straight to /reviews only ever renders the first 15 reviews
+# with no further infinite scroll. The scraper clicks the "show all N
+# reviews" link itself, which is what actually wires up pagination.
+SCRAPE_TARGETS = [
+    (
+        "富臨飯店",
+        "銅鑼灣, Hong Kong",
+        "https://www.openrice.com/zh/hongkong/r-%E5%AF%8C%E8%87%A8%E9%A3%AF%E5%BA%97-"
+        "%E9%8A%85%E9%91%BC%E7%81%A3-%E7%B2%B5%E8%8F%9C-%E5%BB%A3%E6%9D%B1-"
+        "%E7%84%A1%E8%82%89%E9%A4%90%E5%96%AE-r161154",
+    ),
+    (
+        # ~3,223 reviews at time of writing (vs. 87 for the target above) -
+        # expect this one to stay "pending" across many manual scrape
+        # sessions before it ever reaches "done".
+        "澳洲牛奶公司",
+        "佐敦, Hong Kong",
+        "https://www.openrice.com/zh/hongkong/r-australia-dairy-company-"
+        "jordan-hong-kong-style-dessert-r90",
+    ),
 ]
 
 
@@ -89,36 +114,53 @@ def run():
     db.init_db()
     session = db.SessionLocal()
     try:
-        if session.query(models.Hotel).first():
-            print("DB already seeded, skipping.")
-            return
+        # Fake demo data (VENUES/REVIEWS) only needs seeding once.
+        if session.query(models.Venue).first():
+            print("DB already seeded with demo data, skipping VENUES/REVIEWS.")
+        else:
+            venues = [models.Venue(name=name, location=location) for name, location in VENUES]
+            session.add_all(venues)
+            session.flush()  # populate venue.id
 
-        hotels = [models.Hotel(name=name, location=location) for name, location in HOTELS]
-        session.add_all(hotels)
-        session.flush()  # populate hotel.id
+            for venue_index, text, source, days_ago, status, aspects in REVIEWS:
+                review = models.Review(
+                    venue_id=venues[venue_index].id,
+                    raw_text=text,
+                    source=source,
+                    scraped_at=datetime.now(UTC) - timedelta(days=days_ago),
+                    status=status,
+                )
+                session.add(review)
+                session.flush()  # populate review.id
 
-        for hotel_index, text, source, days_ago, status, aspects in REVIEWS:
-            review = models.Review(
-                hotel_id=hotels[hotel_index].id,
-                raw_text=text,
-                source=source,
-                scraped_at=datetime.now(UTC) - timedelta(days=days_ago),
-                status=status,
-            )
-            session.add(review)
-            session.flush()  # populate review.id
+                for aspect_text, sentiment, span in aspects:
+                    session.add(models.AspectExtraction(
+                        review_id=review.id,
+                        aspect_text=aspect_text,
+                        sentiment=sentiment,
+                        span=span,
+                        model_version="manual-seed-v1",
+                    ))
+            session.commit()
+            print(f"Seeded {len(venues)} demo venues, {len(REVIEWS)} reviews.")
 
-            for aspect_text, sentiment, span in aspects:
-                session.add(models.AspectExtraction(
-                    review_id=review.id,
-                    aspect_text=aspect_text,
-                    sentiment=sentiment,
-                    span=span,
-                    model_version="manual-seed-v1",
-                ))
-
+        # SCRAPE_TARGETS is the source of truth for real restaurants the
+        # scraper should pick up - added independently of the demo-data
+        # check above so a new target here gets picked up by re-running
+        # this script even on an already-seeded DB.
+        existing_urls = {
+            url for (url,) in session.query(models.Venue.source_url)
+            if url is not None
+        }
+        new_targets = [
+            models.Venue(name=name, location=location, source_url=source_url,
+                         scrape_status="pending")
+            for name, location, source_url in SCRAPE_TARGETS
+            if source_url not in existing_urls
+        ]
+        session.add_all(new_targets)
         session.commit()
-        print(f"Seeded {len(hotels)} hotels, {len(REVIEWS)} reviews.")
+        print(f"Added {len(new_targets)} new scrape target venue(s).")
     finally:
         session.close()
 

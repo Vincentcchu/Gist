@@ -1,0 +1,51 @@
+# LoRA fine-tune for ACOS quad extraction.
+# Overridable from the CLI (and therefore from SageMaker hyperparameters):
+#   python ml/training/train.py --model-id Qwen/Qwen2.5-0.5B-Instruct --max-examples 50
+
+model_id: Qwen/Qwen3-8B
+max_seq_len: 1024
+seed: 13
+
+lora:
+  r: 32
+  alpha: 64
+  dropout: 0.05
+  target_modules:
+    - q_proj
+    - k_proj
+    - v_proj
+    - o_proj
+    - gate_proj
+    - up_proj
+    - down_proj
+
+training:
+  epochs: 2
+  learning_rate: 1.0e-4
+  # Qwen's vocab is 151,936 tokens, so the logits tensor (batch x seq x vocab) dominates
+  # memory, not the weights: at seq 1024 that is ~1.2GB per copy in bf16 before the loss
+  # upcasts it to fp32. Keep the per-device batch small and buy the effective batch back
+  # with accumulation.
+  per_device_train_batch_size: 2
+  gradient_accumulation_steps: 8
+  warmup_ratio: 0.03
+  lr_scheduler_type: cosine
+  logging_steps: 10
+  eval_steps: 100
+  save_steps: 200
+
+# 4-bit is applied only when CUDA is present. bitsandbytes is CUDA-only, so local Mac runs
+# silently fall back to full-precision LoRA on a small model.
+quantization:
+  load_in_4bit: true
+
+# Generation-based eval on a val sample. Catches the failure modes loss cannot see:
+# unparseable JSON, and spans the model invented rather than copied.
+generation_eval:
+  enabled: true
+  num_samples: 16
+  max_new_tokens: 512
+
+wandb:
+  enabled: true
+  project: review-absa

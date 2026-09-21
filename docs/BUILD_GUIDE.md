@@ -11,7 +11,13 @@ Each phase produces something visible/testable before you move on. Don't skip ah
 - [ ] Local Python env (3.11+), `poetry` or plain `venv`
 - [ ] W&B account (free tier)
 - [ ] Pick your teacher model (Claude/GPT via API) and get an API key
-- [ ] Decide your base model now so you're not switching later: **Qwen2.5-7B-Instruct** or **Llama-3.1-8B-Instruct** — strong multilingual (including Chinese) instruction-following, well-supported by LoRA tooling (PEFT/Unsloth), and a meaningfully higher quality ceiling than smaller models for handling code-switching/sarcasm. Chosen deliberately over a 1.5-3B model to get real LoRA-on-a-real-sized-model experience and a stronger quality guarantee; the tradeoff is higher serving cost/latency later (worth noting in the model card).
+- [x] Base model decided: **Qwen3-8B**. Picked on task fit, not availability:
+  - **Tokenizer economics.** Qwen's 151k vocab encodes traditional Chinese at ~1-1.5 chars/token; Llama-3.1 needs ~2-3 tokens *per char*. That decides whether a p99 review fits in a 1024 sequence or needs 2048 — roughly 2x on training time and per-review serving cost — and verbatim span copying is far more reliable over clean tokens than byte-fallback fragments.
+  - **Cantonese, not just Chinese.** The corpus is dense in 咗/嘅/㗎/喺, rare in Mandarin-dominant pretraining. Qwen3 covers 119 languages/dialects vs Qwen2.5's 29. This is the biggest quality lever available, and it lives in the base model rather than the LoRA.
+  - **JSON adherence.** A malformed generation scores zero on every quad in that review, so format reliability shows up as F1 whether or not you attribute it correctly.
+  - Rejected: **Llama-3.1-8B** (strictly dominated — worse tokenizer *and* weaker Chinese); **XLM-R token tagging** (BIO can't represent free-text aspects with overlapping multi-clause opinions, let alone 4 slots); **mT5/GAS seq2seq**, the academic ACOS default (weaker colloquial Cantonese and format control, no offsetting gain).
+  - **Sharp edge:** Qwen3 is a hybrid-thinking model whose template injects an empty `<think></think>` block when thinking is off. Training and inference must render the prompt identically or quality drops in a way that looks like a bad adapter. `ml/training/prompt_format.py` is the single source of truth, and `train.py` writes a `prompt_contract.json` next to the adapter to assert against.
+  - Chosen deliberately over a 1.5-3B model to get real LoRA-on-a-real-sized-model experience and a stronger quality ceiling; the tradeoff is higher serving cost/latency later. **Qwen3-4B-Instruct-2507** is trained alongside as the cost/quality baseline, so the model card reports a measured tradeoff rather than an assumed one.
 - [ ] AWS account set up, since fine-tuning will run on SageMaker (see Phase 5)
 
 **Checkpoint**: `docker run` a "hello world" FastAPI container locally, confirm it runs. Don't touch cloud yet.
@@ -43,20 +49,34 @@ Goal: something on screen, before any scraping or ML.
 
 ---
 
-## Phase 3 — Teacher labeling for free-text aspects (3-4 days)
+## Phase 3 — Teacher labeling of the real reviews (3-4 days)
 
-Since you want *free-text* aspects (not fixed categories), your prompt design matters more here than in the fixed-taxonomy version — you're teaching the small model to imitate an open-ended extraction pattern, so the teacher's output format needs to be consistent.
+**This is the gating work for every number the project reports.** Training data is currently
+100% synthetic; the 312 scraped OpenRice reviews in the DB are still `status='pending'`. Until
+they're labeled and validated, there is no honest headline metric.
 
-- [ ] `ml/labeling/prompts.py` — design the extraction prompt. Ask for structured JSON output like:
+- [x] `ml/labeling/prompts.py` — ACOS extraction prompt, output identical to the fine-tuning
+  target in `ml/training/prompt_format.py`:
   ```json
-  [{"aspect": "check-in speed", "sentiment": "negative", "span": "waited 40 minutes to check in"}]
+  [{"term": "個waiter", "category": "Service", "polarity": "negative", "opinion": "成晚黑面"}]
   ```
-  Give 5-8 few-shot examples covering: English reviews, Cantonese-English code-switched reviews, short reviews, reviews with multiple aspects, reviews with sarcasm/mixed sentiment.
-- [ ] `ml/labeling/label_with_teacher.py` — pulls `pending` reviews, calls teacher, writes results to `AspectExtraction` with `model_version = 'teacher-v1'`
-- [ ] Run on ~50 reviews first, read every output by eye. Fix the prompt before scaling — cheap now, expensive after you've labeled 1000 reviews with a bad prompt.
+  Eight few-shot examples covering English, word-level code-switching, sarcasm, a one-liner with
+  no stated aspect, one term carrying two judgments, and a balanced phrase kept as one quad.
+- [ ] `ml/labeling/label_with_teacher.py` — pulls `pending` reviews, calls teacher, writes to
+  `AspectExtraction` with `model_version = 'teacher-v1'`. Needs a `category` column added first
+  (see Phase 1 note below).
+- [ ] **Reject and re-prompt any quad whose `term`/`opinion` isn't a verbatim substring.** The
+  synthetic set failed this 18% of the time; assume the teacher will too unless checked.
+- [ ] Deliberately cover **implicit quads** (`term: "NULL"` / `opinion: "NULL"`). The synthetic
+  set contains zero of either, so this pass is the only source of that supervision.
+- [ ] Run on ~50 reviews first, read every output by eye. Fix the prompt before scaling — cheap
+  now, expensive after you've labeled 1000 reviews with a bad prompt.
 - [ ] Run on your full backlog
 
-**Checkpoint**: A table of reviews with free-text aspect/sentiment pairs attached, teacher-generated.
+**Checkpoint**: real reviews with verbatim-verified ACOS quads attached, teacher-generated.
+
+> `AspectExtraction` currently has no `category` column. The quad maps as
+> `term -> aspect_text`, `polarity -> sentiment`, `opinion -> span`, plus a new `category`.
 
 ---
 
@@ -75,11 +95,17 @@ This step is what makes your eval numbers later actually mean something.
 
 ## Phase 5 — Fine-tune the generative model on SageMaker (1-1.5 weeks, most of it waiting on training runs)
 
-- [ ] `ml/training/prepare_dataset.py` — format each example as an instruction-tuning pair: input = review text + instruction, output = the JSON aspect list. Match the format your base model expects (check Qwen/Llama's chat template). Upload the prepared train/val splits to S3.
+- [x] `ml/training/prepare_dataset.py` — normalizes the raw synthetic set into span-verified ACOS quads and writes stratified train/val/synthetic_test splits. Enforces one invariant: **every emitted `opinion` is either the original label verbatim or a punctuation-delimited fragment of it, verbatim** — nothing synthesized. 23,908 raw labels → 32,283 quads (+35%), 4,987/5,000 reviews retained, 0 verbatim violations.
+- [x] `ml/training/verify_dataset.py` — independent audit (re-declares the schema rather than importing it, so a bug in the normalizer can't validate itself): verbatim spans, split leakage, stratification.
 - [ ] Set up a SageMaker execution role (IAM) with S3 read/write and ECR pull permissions
-- [ ] `ml/training/train.py` — LoRA fine-tune via PEFT (or Unsloth) on Qwen2.5-7B-Instruct or Llama-3.1-8B-Instruct, packaged as a SageMaker training job (HuggingFace estimator or a custom container)
+- [x] `ml/training/train.py` — LoRA fine-tune via PEFT on Qwen3-8B. One script for every environment: reads `SM_CHANNEL_*` / `SM_MODEL_DIR` when present, local paths otherwise. Key detail is **completion-only loss masking** (prompt tokens set to `-100`) — training on the prompt spends most of the gradient reproducing review text the model already sees. Over-length examples are dropped, never truncated, since a truncated target is malformed JSON.
+- [x] `ml/training/launch_sagemaker.py` — thin PyTorch-estimator wrapper around the same `train.py`.
 - [ ] Instance choice: `ml.g5.2xlarge` (A10G, 24GB) for standard runs; `ml.g5.12xlarge` or `ml.p4d.24xlarge` (A100, 40GB+) if you want faster iteration or larger batch sizes
-- [ ] Log to W&B: loss curves, hyperparameters, LoRA rank/alpha, learning rate
+- [ ] If you hit OOM, lower `per_device_train_batch_size` before anything else and buy the effective batch back with `gradient_accumulation_steps`. Qwen's vocab is 151,936 tokens, so the logits tensor (batch × seq × vocab) dominates memory rather than the weights — at seq 1024 that is ~1.2GB per copy in bf16, before the loss upcasts to fp32. This is why the local smoke test needs `--batch-size 1` even on a 0.5B model.
+- [ ] Log to W&B: loss curves, hyperparameters, LoRA rank/alpha, learning rate, plus two
+  generation-based metrics that loss cannot see — **`eval_json_parse_rate`** and
+  **`eval_span_verbatim_rate`** (is the model copying spans, or inventing them?). A falling loss
+  with a flat verbatim rate means it's learning the format and hallucinating the content.
 - [ ] Start with a small SageMaker run (1 epoch, subset of data) to confirm the training script + container + S3 I/O all work end-to-end before committing to a full run — debugging a failed SageMaker job is slower than local, so validate the pipeline cheaply first
 - [ ] Run 2-3 hyperparameter variants (learning rate, LoRA rank) as separate SageMaker jobs, compare via W&B
 - [ ] Checkpoints land in S3 automatically via the SageMaker training job output path
