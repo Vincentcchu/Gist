@@ -20,14 +20,18 @@ Cantonese-English code-switching). Portfolio project targeting applied ML Engine
   of higher serving latency/cost later (tracked in the model card, not hidden).
   Note Qwen3 is a hybrid-thinking model — the chat template must be identical
   between training and inference (see `ml/training/prompt_format.py`).
-- Training: AWS SageMaker training jobs (not local/RunPod) — `ml.g5.2xlarge`
-  (A10G, 24GB) as the default instance, stepping up to `ml.g5.12xlarge` /
-  `ml.p4d` (A100) if iteration speed matters. Data/checkpoints via S3.
+- Training, two deliberate paths sharing one tokenizer (`prompt_format.py`):
+  - **Now — local MLX QLoRA** on the M5 MacBook Air (24GB): `ml/training/train_mlx.py`
+    on 4-bit models converted with `mlx_lm.convert`. Measured: 4B 0.56 it/s / 5.0GB,
+    8B 0.28 it/s / 7.8GB peak.
+  - **Later — PyTorch/PEFT on SageMaker** (`train.py`, `launch_sagemaker.py`):
+    `ml.g5.2xlarge` (A10G, 24GB) default. Deferred, not cancelled — having both
+    frameworks is intentional experience, not duplication.
 - Experiment tracking: Weights & Biases
 - Deployment: Docker containers, no Kubernetes/Terraform for the app layer
 
 ## Conventions
-- Python 3.11+ (use the conda env `review-absa`, not a nested venv), type
+- Python 3.11+ (use the conda env `gist`, not a nested venv), type
   hints everywhere, black formatting
 - Plain `requirements.txt` per service, no Poetry
 - SQLAlchemy models in app/models.py, one class per table
@@ -36,21 +40,26 @@ Cantonese-English code-switching). Portfolio project targeting applied ML Engine
   explicit/readable code over clever code
 
 ## Current phase
-Phase 5 — LoRA training pipeline. `ml/data/processed/` holds span-verified ACOS
-quads from the synthetic set; `ml/training/` has prepare/verify/train/launch.
+Phase 5 — training on the **synthetic set only**, locally via MLX. Span-verified
+ACOS quads in `ml/data/processed/`; the real test set (50 hand-labeled OpenRice
+reviews) in `ml/data/real/`.
 
-Phases 3-4 on *real* data are still outstanding and are the gating work for any
-headline metric: the 312 scraped OpenRice reviews in `app/local.db` are still
-`status='pending'`, so the only labeled data is synthetic. A synthetic-test F1
-is not a result — the real number needs the teacher pass
-(`ml/labeling/prompts.py`) plus a human-validated split.
+**Scope decision:** Phases 3-4 (teacher-labeling real reviews) are *deferred*,
+not skipped — scraping real reviews proved harder than planned, so the product
+gets built end to end on synthetic data first and data quality is upgraded
+afterwards. Consequences to keep honest in the model card:
+- Training data is 100% synthetic. The hand-labeled real set is eval-only.
+- Headline numbers are the synthetic-vs-real *gap*, never synthetic F1 alone.
+- The scraper has known defects: 富臨飯店 reviews are truncated previews
+  (`…查看更多`) and some reviews carry scraped UI counters. See
+  `ml/data/real/README.md`.
 
 See docs/BUILD_GUIDE.md for the full phase plan.
 
 ## What NOT to build yet
 No auth, no SQS/queues (use a `status` column), no Terraform/VPC/IAM for the
-app layer. AWS is scoped specifically to SageMaker for training (Phase 5), not
-the whole app's infra.
+app layer. AWS is scoped specifically to SageMaker for training (deferred scale-up
+stage), not the whole app's infra.
 
 ## How to work with me on this
 - Use plan mode before implementing anything non-trivial — I want to review

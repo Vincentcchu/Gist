@@ -49,11 +49,18 @@ Goal: something on screen, before any scraping or ML.
 
 ---
 
-## Phase 3 — Teacher labeling of the real reviews (3-4 days)
+## Phase 3 — Teacher labeling of the real reviews (3-4 days) — ⏸ DEFERRED
 
-**This is the gating work for every number the project reports.** Training data is currently
-100% synthetic; the 312 scraped OpenRice reviews in the DB are still `status='pending'`. Until
-they're labeled and validated, there is no honest headline metric.
+> **Deferred by scope decision.** Scraping real reviews proved harder than planned, so the
+> product is being built end to end on the synthetic set first (Phase 5) and data quality is
+> upgraded afterwards. This phase is the upgrade path, not cancelled. In the meantime, 50 real
+> reviews were hand-labeled as an eval-only test set — see Phase 4.
+>
+> Fix the scraper before resuming: every 富臨飯店 review in the DB is a truncated preview card
+> ending in "…查看更多", and 48 reviews carry scraped like/comment counters as trailing text.
+
+Training data is currently 100% synthetic; the 312 scraped OpenRice reviews in the DB are still
+`status='pending'`.
 
 - [x] `ml/labeling/prompts.py` — ACOS extraction prompt, output identical to the fine-tuning
   target in `ml/training/prompt_format.py`:
@@ -80,9 +87,16 @@ they're labeled and validated, there is no honest headline metric.
 
 ---
 
-## Phase 4 — Human validation (2-3 days, don't rush this)
+## Phase 4 — Human validation (2-3 days, don't rush this) — ◐ REDUCED
 
 This step is what makes your eval numbers later actually mean something.
+
+**Done instead, for now:** a 50-review hand-labeled real test set, eval-only, committed at
+`ml/data/real/real_test.jsonl` (labeling rules and known limits in `ml/data/real/README.md`).
+`export_for_validation.py` builds the template: excludes truncated previews, strips scraped
+counters, stratifies by length tertile, and refuses to overwrite labeled work. Validate with
+`verify_dataset.py --files ml/data/real/real_test.jsonl`. The full teacher-validation flow
+below resumes with Phase 3.
 
 - [ ] `ml/labeling/export_for_validation.py` — export ~150-200 examples (stratified: some short, some long, some code-switched) to a spreadsheet or a simple labeling tool
 - [ ] Go through by hand: mark each teacher-generated aspect as correct/incorrect, add any aspects the teacher missed, fix sentiment errors
@@ -93,9 +107,36 @@ This step is what makes your eval numbers later actually mean something.
 
 ---
 
-## Phase 5 — Fine-tune the generative model on SageMaker (1-1.5 weeks, most of it waiting on training runs)
+## Phase 5 — Fine-tune the generative model (1-1.5 weeks, most of it waiting on training runs)
 
-- [x] `ml/training/prepare_dataset.py` — normalizes the raw synthetic set into span-verified ACOS quads and writes stratified train/val/synthetic_test splits. Enforces one invariant: **every emitted `opinion` is either the original label verbatim or a punctuation-delimited fragment of it, verbatim** — nothing synthesized. 23,908 raw labels → 32,283 quads (+35%), 4,987/5,000 reviews retained, 0 verbatim violations.
+Two stages, both deliberate — they share `prompt_format.py`, so both frameworks train on
+byte-identical token sequences (verified: 500/500 identical between the HF and MLX tokenizers).
+
+### 5a — Local QLoRA on the M5 via MLX (now)
+
+- [x] Trim the system prompt 304 → 148 tokens. Mean example 627 → 471 tokens (−25% compute on
+  every step and every inference call); all 4,498 examples now fit in 1,024 tokens.
+- [x] 4-bit conversion from the official Qwen weights, identical settings for both models:
+  `mlx_lm.convert --hf-path <repo> --mlx-path ml/models/<name> -q --q-bits 4 --q-group-size 64 --q-mode affine`
+  (Qwen3-8B 4.3GB, Qwen3-4B-Instruct-2507 2.1GB). With huggingface_hub 1.32, run
+  `snapshot_download(<repo>)` first — mlx-lm's save step otherwise fails on an incomplete cache.
+- [x] `ml/training/train_mlx.py` — uses mlx-lm's trainer directly, not the `mlx_lm.lora` CLI,
+  because four CLI defaults silently diverge from the PyTorch run (read from mlx-lm 0.31.3
+  source): its chat dataset omits `enable_thinking=False` (Qwen3 would learn to emit an empty
+  `<think>` block), its batcher silently truncates over-length JSON targets, LoRA goes on only
+  the last 16 layers, and `scale` defaults to 20 where our PEFT alpha/rank is 2.0.
+- [x] Smoke test (Qwen3-0.6B, 400 examples, 25 optimizer steps): val loss 0.77 → 0.19, JSON
+  parse rate 0 → 0.81, verbatim span rate 0.98.
+- [x] Measured throughput: 4B **0.556 it/s, 5.0GB peak**; 8B **0.283 it/s, 7.8GB peak**.
+  2 epochs ≈ 5h (4B) / 9.5h (8B). The M5 Air is fanless, so expect sustained runs to throttle
+  below these short-run numbers; keep it plugged in with the lid open (`caffeinate -dims`).
+- [ ] Train 4B, then 8B, identical hyperparameters. Decide the 8B's epoch count from the 4B's
+  val curve — if val loss has flattened by the end of epoch 1, the 8B's second epoch isn't worth
+  ~5 more hours.
+
+### 5b — PyTorch/PEFT on SageMaker (deferred scale-up)
+
+- [x] `ml/training/prepare_dataset.py` — normalizes the raw synthetic set into span-verified ACOS quads and writes stratified train/val/synthetic_test splits. Enforces one invariant: **every emitted `opinion` is either the original label verbatim or a punctuation-delimited fragment of it, verbatim** — nothing synthesized. 23,908 raw labels → 35,390 quads (+48%), 5,000/5,000 reviews retained, 0 verbatim violations. (Whitespace is also a clause boundary when every part is CJK — casual Cantonese uses spaces for punctuation.)
 - [x] `ml/training/verify_dataset.py` — independent audit (re-declares the schema rather than importing it, so a bug in the normalizer can't validate itself): verbatim spans, split leakage, stratification.
 - [ ] Set up a SageMaker execution role (IAM) with S3 read/write and ECR pull permissions
 - [x] `ml/training/train.py` — LoRA fine-tune via PEFT on Qwen3-8B. One script for every environment: reads `SM_CHANNEL_*` / `SM_MODEL_DIR` when present, local paths otherwise. Key detail is **completion-only loss masking** (prompt tokens set to `-100`) — training on the prompt spends most of the gradient reproducing review text the model already sees. Over-length examples are dropped, never truncated, since a truncated target is malformed JSON.
@@ -118,11 +159,14 @@ This step is what makes your eval numbers later actually mean something.
 
 ## Phase 6 — Evaluation (2-3 days — do not skip this for a demo-only fine-tune)
 
-Free-text aspect extraction is harder to score than fixed-category classification, since your model's aspect phrasing won't exactly match the teacher's. Handle this properly:
-
-- [ ] `ml/eval/evaluate.py` — run your fine-tuned model on the held-out **test set**
-- [ ] Since aspects are free text, use **semantic similarity matching** (e.g., embed both teacher-aspect and model-aspect with a sentence embedding model, match if cosine similarity > threshold) rather than exact string match, to compute precision/recall/F1
-- [ ] Score sentiment classification separately (this one *can* be exact-match: positive/negative/neutral)
+- [x] `ml/eval/evaluate.py` — **exact-match micro P/R/F1 over full quads**, the standard ACOS
+  metric. The semantic-similarity matching originally planned here was designed for free-text
+  *English* aspects; ours are verbatim spans of the input, so exact match is well-defined and
+  stricter. Partial views localize failures: term / term+category / term+polarity /
+  category+polarity (what the dashboard aggregates) / full quad, plus per-category and
+  per-polarity F1. Generations are cached, so re-scoring never needs the model.
+- [ ] Run on `synthetic_test` and `real_test` side by side — **the gap is the headline
+  finding**, not the synthetic number.
 - [ ] `ml/eval/error_analysis.py` — pull the worst 15-20 examples, read them, categorize failure types (misses short reviews? struggles with code-switching? invents aspects not in the text?)
 - [ ] Compare cost/latency: teacher API cost per review vs. your fine-tuned model's inference cost per review (this is your resume metric — note that a 7-8B model narrows the cost/latency gap vs. teacher compared to a smaller model, so be precise about the actual numbers rather than assuming a dramatic win; this is a real, discussable tradeoff, not a problem to hide)
 

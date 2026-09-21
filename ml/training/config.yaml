@@ -1,6 +1,8 @@
-# LoRA fine-tune for ACOS quad extraction.
-# Overridable from the CLI (and therefore from SageMaker hyperparameters):
-#   python ml/training/train.py --model-id Qwen/Qwen2.5-0.5B-Instruct --max-examples 50
+# LoRA fine-tune for ACOS quad extraction. Read by both trainers:
+#   train.py      PyTorch/PEFT, CUDA (SageMaker, rented GPUs)
+#   train_mlx.py  MLX, local QLoRA on Apple silicon
+# Everything outside the `mlx:` section is shared, so the two runs can't drift apart on
+# hyperparameters. Step counts (logging/eval/save, warmup) are in OPTIMIZER steps for both.
 
 model_id: Qwen/Qwen3-8B
 max_seq_len: 1024
@@ -34,8 +36,8 @@ training:
   eval_steps: 100
   save_steps: 200
 
-# 4-bit is applied only when CUDA is present. bitsandbytes is CUDA-only, so local Mac runs
-# silently fall back to full-precision LoRA on a small model.
+# bitsandbytes 4-bit, train.py on CUDA only. The MLX path quantizes ahead of time instead
+# (see mlx.model_path).
 quantization:
   load_in_4bit: true
 
@@ -49,3 +51,18 @@ generation_eval:
 wandb:
   enabled: true
   project: review-absa
+
+mlx:
+  # Pre-converted 4-bit weights (affine, group size 64) - see BUILD_GUIDE Phase 5 for the
+  # mlx_lm.convert command. Both models are quantized identically so the 8B-vs-4B comparison
+  # isolates model size.
+  model_path: ml/models/qwen3-8b-4bit
+  # Micro-batch 1 x accumulation 16 = effective batch 16, the same as training above
+  # (2 x 8). train_mlx.py refuses to run if the two products differ, since the runs would no
+  # longer be comparable.
+  batch_size: 1
+  gradient_accumulation_steps: 16
+  # mlx-lm defaults to LoRA on only the last 16 layers; PEFT adapts every layer. -1 = all.
+  num_layers: -1
+  grad_checkpoint: true
+  val_batches: 50

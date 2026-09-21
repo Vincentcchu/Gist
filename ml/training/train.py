@@ -10,7 +10,10 @@ Local smoke test on Apple silicon (verified end to end):
 
 `--batch-size 1` is not optional on MPS. Qwen's 151,936-token vocabulary makes the logits
 tensor (batch x seq x vocab) the memory bottleneck rather than the weights, and batch 4 at
-seq 1024 OOMs a 0.5B model on a 32GB Mac.
+seq 1024 OOMs a 0.5B model on a 24GB M5 MacBook Air.
+
+This script is the PyTorch/PEFT path for CUDA (SageMaker, rented GPUs). Local QLoRA on
+Apple silicon goes through train_mlx.py instead - see that file for why.
 
 Full run:
     python ml/training/train.py
@@ -38,10 +41,14 @@ from transformers import (
     TrainingArguments,
 )
 
-from prompt_format import SYSTEM_PROMPT, build_target, render_prompt
+from prompt_format import (
+    encode_example,
+    generation_metrics,
+    prompt_contract,
+    render_prompt,
+)
 
 CONFIG_PATH = Path(__file__).parent / "config.yaml"
-CANARY_TEXT = "個叉燒好正，不過個waiter好慢。"
 
 
 def resolve_paths(args: argparse.Namespace) -> tuple[Path, Path, Path]:
@@ -62,36 +69,22 @@ def read_jsonl(path: Path) -> list[dict[str, Any]]:
         return [json.loads(line) for line in handle if line.strip()]
 
 
-def encode(
-    example: dict[str, Any], tokenizer: Any, max_seq_len: int
-) -> dict[str, list[int]] | None:
-    """Tokenize one example, masking the prompt so loss is computed on the JSON target only.
-
-    Over-length examples are dropped rather than truncated: a truncated target is malformed
-    JSON, and training on it teaches the model to emit malformed JSON.
-    """
-    prompt_ids = tokenizer(
-        render_prompt(tokenizer, example["text"]), add_special_tokens=False
-    ).input_ids
-    target_ids = tokenizer(
-        build_target(example["quads"]), add_special_tokens=False
-    ).input_ids + [tokenizer.eos_token_id]
-
-    if len(prompt_ids) + len(target_ids) > max_seq_len:
-        return None
-
-    return {
-        "input_ids": prompt_ids + target_ids,
-        "labels": [-100] * len(prompt_ids) + target_ids,
-    }
-
-
 def build_dataset(
     examples: list[dict[str, Any]], tokenizer: Any, max_seq_len: int, name: str
 ) -> list[dict[str, list[int]]]:
-    encoded = [encode(e, tokenizer, max_seq_len) for e in examples]
-    kept = [e for e in encoded if e is not None]
-    dropped = len(encoded) - len(kept)
+    kept: list[dict[str, list[int]]] = []
+    for example in examples:
+        encoded = encode_example(example, tokenizer, max_seq_len)
+        if encoded is None:
+            continue
+        token_ids, prompt_length = encoded
+        kept.append(
+            {
+                "input_ids": token_ids,
+                "labels": [-100] * prompt_length + token_ids[prompt_length:],
+            }
+        )
+    dropped = len(examples) - len(kept)
     print(f"  {name}: {len(kept)} examples ({dropped} dropped as over-length)")
     return kept
 
@@ -116,15 +109,21 @@ class PadCollator:
 
 
 class GenerationEval(TrainerCallback):
-    """Measure what loss cannot: does the output parse, and are the spans really copied?"""
+    """Measure what loss cannot: does the output parse, and are the spans really copied?
+
+    Logs through the trainer rather than by adding to `metrics`: Trainer.evaluate() logs its
+    metrics *before* calling on_evaluate, so anything added to that dict here is never logged.
+    """
 
     def __init__(
         self,
+        trainer: Trainer,
         model: Any,
         tokenizer: Any,
         examples: list[dict[str, Any]],
         max_new_tokens: int,
     ) -> None:
+        self.trainer = trainer
         self.model = model
         self.tokenizer = tokenizer
         self.examples = examples
@@ -149,37 +148,13 @@ class GenerationEval(TrainerCallback):
         was_training = self.model.training
         self.model.eval()
 
-        parsed = 0
-        spans_total = 0
-        spans_verbatim = 0
-        predicted = 0
-
-        for example in self.examples:
-            try:
-                quads = json.loads(self._generate(example["text"]))
-            except (json.JSONDecodeError, TypeError):
-                continue
-            if not isinstance(quads, list):
-                continue
-            parsed += 1
-            predicted += len(quads)
-            for quad in quads:
-                if not isinstance(quad, dict):
-                    continue
-                for field in ("term", "opinion"):
-                    value = quad.get(field)
-                    if not isinstance(value, str):
-                        continue
-                    spans_total += 1
-                    if value == "NULL" or value in example["text"]:
-                        spans_verbatim += 1
-
-        if metrics is not None:
-            metrics["eval_json_parse_rate"] = parsed / len(self.examples)
-            metrics["eval_span_verbatim_rate"] = (
-                spans_verbatim / spans_total if spans_total else 0.0
-            )
-            metrics["eval_quads_per_review"] = predicted / parsed if parsed else 0.0
+        results = [(self._generate(e["text"]), e["text"]) for e in self.examples]
+        self.trainer.log(
+            {
+                f"eval_{name}": value
+                for name, value in generation_metrics(results).items()
+            }
+        )
 
         if was_training:
             self.model.train()
@@ -213,7 +188,7 @@ def load_model(config: dict[str, Any], model_id: str) -> Any:
                 bnb_4bit_use_double_quant=True,
             )
     else:
-        # bitsandbytes is CUDA-only, so there is no 4-bit path on Mac or CPU.
+        # No 4-bit path off CUDA here. Local quantized training uses train_mlx.py.
         kwargs["dtype"] = torch.float32
 
     model = AutoModelForCausalLM.from_pretrained(model_id, **kwargs)
@@ -237,19 +212,9 @@ def load_model(config: dict[str, Any], model_id: str) -> Any:
 
 
 def save_prompt_contract(output_dir: Path, tokenizer: Any) -> None:
-    """Persist the exact rendered prompt so inference can assert it matches training.
-
-    Qwen3's template injects an empty <think></think> block when thinking is disabled. If
-    serving renders the prompt even slightly differently, quality drops in a way that is
-    easy to misread as a bad adapter.
-    """
-    contract = {
-        "system_prompt": SYSTEM_PROMPT,
-        "rendered_example": render_prompt(tokenizer, CANARY_TEXT),
-        "canary_text": CANARY_TEXT,
-    }
     (output_dir / "prompt_contract.json").write_text(
-        json.dumps(contract, ensure_ascii=False, indent=2), encoding="utf-8"
+        json.dumps(prompt_contract(tokenizer), ensure_ascii=False, indent=2),
+        encoding="utf-8",
     )
 
 
@@ -350,6 +315,7 @@ def main() -> None:
     if gen_cfg["enabled"] and not args.no_generation_eval:
         trainer.add_callback(
             GenerationEval(
+                trainer=trainer,
                 model=model,
                 tokenizer=tokenizer,
                 examples=val_raw[: gen_cfg["num_samples"]],

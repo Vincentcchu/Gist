@@ -8,12 +8,17 @@ __pycache__/
 
 ml/data/cache/
 ml/outputs/
+# 4-bit MLX conversions of the base models; regenerate with mlx_lm.convert (see BUILD_GUIDE).
+ml/models/
 *.safetensors
 wandb/
 
 # Datasets stay out of git. ml/data/raw/README.md documents the schema and provenance;
 # prepare_dataset.py regenerates every split from the raw file deterministically.
 ml/data/**/*.jsonl
+# ...except the hand-labeled real test set: small, irreplaceable, and every reported
+# eval number depends on it.
+!ml/data/real/real_test.jsonl
 
 # Scraper debugging scratch - page dumps and a CAPTCHA screenshot. The findings they
 # produced are written up in scraper/README.md, which is the part worth keeping.

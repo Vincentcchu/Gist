@@ -33,7 +33,9 @@ def load(path: Path) -> list[dict[str, Any]]:
         return [json.loads(line) for line in handle if line.strip()]
 
 
-def check_split(name: str, examples: list[dict[str, Any]]) -> list[str]:
+def check_split(
+    name: str, examples: list[dict[str, Any]], allow_empty: bool = False
+) -> list[str]:
     failures: list[str] = []
     quads_seen = 0
 
@@ -42,7 +44,7 @@ def check_split(name: str, examples: list[dict[str, Any]]) -> list[str]:
         quads = example["quads"]
         where = f"{name}[{index}]"
 
-        if not quads:
+        if not quads and not allow_empty:
             failures.append(f"{where}: empty quads")
 
         for quad in quads:
@@ -67,10 +69,50 @@ def check_split(name: str, examples: list[dict[str, Any]]) -> list[str]:
     return failures
 
 
+def check_files(paths: list[Path], allow_empty: bool) -> None:
+    failures: list[str] = []
+    print("=== files ===")
+    for path in paths:
+        examples = load(path)
+        failures.extend(check_split(path.name, examples, allow_empty))
+        if allow_empty:
+            done = sum(1 for e in examples if e["quads"])
+            print(f"  progress: {done}/{len(examples)} reviews labeled")
+        if len({e["text"] for e in examples}) != len(examples):
+            failures.append(f"{path.name}: duplicate review texts")
+    report(failures, "PASS: all spans verbatim or NULL, schema valid")
+
+
+def report(failures: list[str], success: str) -> None:
+    if failures:
+        print(f"\nFAILED: {len(failures)} problems")
+        for failure in failures[:20]:
+            print(f"  - {failure}")
+        sys.exit(1)
+    print(f"\n{success}")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--dir", type=Path, default=Path("ml/data/processed"))
+    parser.add_argument(
+        "--files",
+        type=Path,
+        nargs="+",
+        help="check these files alone (e.g. the hand-labeled real test set) - schema and "
+        "verbatim spans only, no cross-split leakage or stratification checks",
+    )
+    parser.add_argument(
+        "--allow-empty",
+        action="store_true",
+        help="with --files: don't fail on unlabeled reviews, so a half-finished labeling "
+        "session surfaces only real span errors",
+    )
     args = parser.parse_args()
+
+    if args.files:
+        check_files(args.files, args.allow_empty)
+        return
 
     print("=== splits ===")
     data = {name: load(args.dir / f"{name}.jsonl") for name in SPLITS}
@@ -103,13 +145,7 @@ def main() -> None:
         )
         print(f"  {name:16s} {shares}")
 
-    if failures:
-        print(f"\nFAILED: {len(failures)} problems")
-        for failure in failures[:20]:
-            print(f"  - {failure}")
-        sys.exit(1)
-
-    print("\nPASS: all spans verbatim, no leakage, schema valid")
+    report(failures, "PASS: all spans verbatim, no leakage, schema valid")
 
 
 if __name__ == "__main__":
