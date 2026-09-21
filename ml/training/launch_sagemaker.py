@@ -1,97 +1,214 @@
-"""Launch train.py as a SageMaker training job.
+"""Launch train.py as a SageMaker training job (SageMaker Python SDK v3).
 
-This is a thin wrapper - all the real logic lives in train.py, which runs identically here
-and locally. Run the local smoke test first; debugging a failed SageMaker job is far slower
-than debugging the same bug on a laptop.
+A thin wrapper - all training logic lives in train.py, which runs identically here and locally.
+This file runs on your laptop only:
 
-    pip install sagemaker boto3
-    python ml/training/launch_sagemaker.py --role arn:aws:iam::<account>:role/<SageMakerRole>
+    pip install sagemaker==3.22.1
+    aws login --region us-east-1
 
-Start small, then scale:
-    --subset 500 --epochs 1        # validate container + S3 I/O cheaply
-    --instance-type ml.g5.12xlarge # faster iteration once it works
+Validate the job request without launching anything (free):
+    python ml/training/launch_sagemaker.py --role <execution-role-arn> \\
+        --model-id Qwen/Qwen3-0.6B --max-examples 200 --epochs 1 --dry-run
+
+Pipeline smoke test (~$0.50), then a 14B fit/speed check before any full run:
+    ... --model-id Qwen/Qwen3-0.6B --max-examples 200 --epochs 1 --wait
+    ... --model-id Qwen/Qwen3-14B --batch-size 1 --max-examples 64 --epochs 1 --wait
+
+The sweep (one at a time - the GPU quota is 1):
+    ... --model-id Qwen/Qwen3-4B-Instruct-2507 --batch-size 4
+    ... --model-id Qwen/Qwen3-8B --batch-size 2
+    ... --model-id Qwen/Qwen3-14B --batch-size 1
+
+When a job finishes, the printed commands fetch its model.tar.gz into ml/outputs/<job>/ and
+score its cached predictions with evaluate.py --from-predictions.
 """
 
 import argparse
+import os
+import shutil
+import tempfile
 from pathlib import Path
 
-import sagemaker
-from sagemaker.pytorch import PyTorch
+from sagemaker.core import image_uris
+from sagemaker.core.helper.session_helper import Session
+from sagemaker.core.training.configs import (
+    Compute,
+    InputData,
+    SourceCode,
+    StoppingCondition,
+)
+from sagemaker.train.model_trainer import ModelTrainer
 
-SOURCE_DIR = Path(__file__).parent
-LOCAL_DATA = Path("ml/data/processed")
+SOURCE_DIR = Path(__file__).resolve().parent
+REPO_ROOT = SOURCE_DIR.parents[1]
+
+# Newest SageMaker PyTorch training container (verified against the SDK's bundled image
+# config and AWS's published list). torch is deliberately unpinned in requirements.txt so
+# this container's CUDA build is the one that runs.
+PYTORCH_VERSION = "2.10.0"
+PY_VERSION = "py313"
+
+CHANNEL_FILES = {
+    "train": ["ml/data/processed/train.jsonl"],
+    "val": ["ml/data/processed/val.jsonl"],
+    # Test sets go in their own channel. train.py only generates on them after training; the
+    # train and val channels never contain them, so nothing in training can read test data.
+    "eval": [
+        "ml/data/processed/synthetic_test.jsonl",
+        "ml/data/real/real_test.jsonl",
+    ],
+}
+
+
+def stage_channels(staging: Path) -> list[InputData]:
+    """Copy each channel's files into its own directory; the SDK uploads each one to S3."""
+    inputs = []
+    for channel, files in CHANNEL_FILES.items():
+        channel_dir = staging / channel
+        channel_dir.mkdir(parents=True)
+        for relative in files:
+            source = REPO_ROOT / relative
+            if not source.exists():
+                raise SystemExit(
+                    f"missing {relative} - run prepare_dataset.py / export_for_validation.py"
+                )
+            shutil.copy(source, channel_dir / source.name)
+        inputs.append(InputData(channel_name=channel, data_source=str(channel_dir)))
+    return inputs
+
+
+def job_basename(model_id: str) -> str:
+    """'Qwen/Qwen3-4B-Instruct-2507' -> 'absa-qwen3-4b-instruct-2507' (SageMaker name rules)."""
+    name = model_id.split("/")[-1].lower().replace(".", "-").replace("_", "-")
+    return f"absa-{name}"[:50]
+
+
+def hyperparameters(args: argparse.Namespace) -> dict[str, object]:
+    """Passed to train.py as `--key value` CLI arguments by the SDK's container driver."""
+    values: dict[str, object] = {"model-id": args.model_id}
+    optional = {
+        "batch-size": args.batch_size,
+        "epochs": args.epochs,
+        "learning-rate": args.learning_rate,
+        "max-examples": args.max_examples,
+    }
+    values.update({key: value for key, value in optional.items() if value is not None})
+    return values
+
+
+def environment(args: argparse.Namespace) -> dict[str, str]:
+    if args.no_wandb:
+        return {"WANDB_MODE": "disabled"}
+    # The secret's name, never the key: train.py fetches the value from Secrets Manager
+    # inside the container, so it doesn't appear in the job definition.
+    return {"WANDB_PROJECT": "review-absa", "WANDB_SECRET_NAME": args.wandb_secret}
+
+
+def print_fetch_commands(job_name: str, artifact_uri: str | None) -> None:
+    uri = artifact_uri or (
+        f"$(aws sagemaker describe-training-job --training-job-name {job_name} "
+        "--query ModelArtifacts.S3ModelArtifacts --output text)"
+    )
+    print(
+        "\nfetch and score:\n"
+        f"  mkdir -p ml/outputs/{job_name}\n"
+        f"  aws s3 cp {uri} - | tar -xz -C ml/outputs/{job_name}\n"
+        f"  python ml/eval/evaluate.py --adapter ml/outputs/{job_name} --from-predictions"
+    )
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
-        "--role", type=str, required=True, help="SageMaker execution role ARN"
+        "--role",
+        default=os.environ.get("SAGEMAKER_ROLE_ARN"),
+        help="execution role ARN (or set SAGEMAKER_ROLE_ARN)",
     )
-    parser.add_argument("--instance-type", type=str, default="ml.g5.2xlarge")
-    parser.add_argument(
-        "--framework-version",
-        type=str,
-        default="2.14.0",
-        help="SageMaker PyTorch DLC version; keep matched to the torch pin",
-    )
-    parser.add_argument("--s3-prefix", type=str, default="review-absa")
-    parser.add_argument("--model-id", type=str, default=None)
+    parser.add_argument("--region", default="us-east-1")
+    parser.add_argument("--instance-type", default="ml.g5.2xlarge")
+    parser.add_argument("--model-id", required=True)
+    parser.add_argument("--batch-size", type=int, default=None)
     parser.add_argument("--epochs", type=float, default=None)
     parser.add_argument("--learning-rate", type=float, default=None)
+    parser.add_argument("--max-examples", type=int, default=None)
     parser.add_argument(
-        "--subset", type=int, default=None, help="cap training examples"
+        "--max-hours",
+        type=float,
+        default=12,
+        help="hard runtime cap - SageMaker stops the job (and the billing) after this",
     )
-    parser.add_argument("--job-name", type=str, default=None)
+    parser.add_argument("--wandb-secret", default="review-absa/wandb-api-key")
+    parser.add_argument("--no-wandb", action="store_true")
     parser.add_argument(
         "--wait", action="store_true", help="stream logs until the job ends"
     )
-    return parser.parse_args()
+    parser.add_argument(
+        "--dry-run", action="store_true", help="validate the request without launching"
+    )
+    args = parser.parse_args()
+    if not args.role:
+        parser.error("--role is required (or set SAGEMAKER_ROLE_ARN)")
+    return args
 
 
 def main() -> None:
     args = parse_args()
-    session = sagemaker.Session()
+    import boto3
 
-    data_uri = session.upload_data(
-        path=str(LOCAL_DATA),
-        bucket=session.default_bucket(),
-        key_prefix=f"{args.s3_prefix}/data",
-    )
-    print(f"data uploaded to {data_uri}")
-
-    hyperparameters: dict[str, object] = {}
-    if args.model_id:
-        hyperparameters["model-id"] = args.model_id
-    if args.epochs is not None:
-        hyperparameters["epochs"] = args.epochs
-    if args.learning_rate is not None:
-        hyperparameters["learning-rate"] = args.learning_rate
-    if args.subset is not None:
-        hyperparameters["max-examples"] = args.subset
-
-    estimator = PyTorch(
-        entry_point="train.py",
-        source_dir=str(SOURCE_DIR),
-        role=args.role,
+    session = Session(boto_session=boto3.Session(region_name=args.region))
+    image = image_uris.retrieve(
+        framework="pytorch",
+        region=args.region,
+        version=PYTORCH_VERSION,
+        py_version=PY_VERSION,
         instance_type=args.instance_type,
-        instance_count=1,
-        # Keep this matched to the torch pin in requirements.txt. If they diverge, pip
-        # reinstalls torch inside the container on every job - slow, and it can land a
-        # build that doesn't match the instance's CUDA. Verify the tag exists first:
-        #   aws sagemaker list-images / the DLC release notes on GitHub.
-        framework_version=args.framework_version,
-        py_version="py311",
-        hyperparameters=hyperparameters,
-        base_job_name=args.job_name or "review-absa-acos",
-        # W&B needs its key inside the container: store it in Secrets Manager or pass
-        # WANDB_API_KEY via environment= before the first real run.
-        environment={"WANDB_PROJECT": "review-absa"},
+        image_scope="training",
+    )
+    print(f"image: {image}")
+
+    trainer = ModelTrainer(
+        sagemaker_session=session,
+        role=args.role,
+        base_job_name=job_basename(args.model_id),
+        training_image=image,
+        source_code=SourceCode(
+            source_dir=str(SOURCE_DIR),
+            entry_script="train.py",
+            requirements="requirements.txt",
+        ),
+        compute=Compute(
+            instance_type=args.instance_type,
+            instance_count=1,
+            # Headroom for the base model download: Qwen3-14B is ~30GB in bf16.
+            volume_size_in_gb=100,
+        ),
+        stopping_condition=StoppingCondition(
+            max_runtime_in_seconds=int(args.max_hours * 3600)
+        ),
+        hyperparameters=hyperparameters(args),
+        environment=environment(args),
     )
 
-    estimator.fit({"train": data_uri, "val": data_uri}, wait=args.wait)
-    print(f"job: {estimator.latest_training_job.name}")
+    with tempfile.TemporaryDirectory() as staging:
+        trainer.train(
+            input_data_config=stage_channels(Path(staging)),
+            wait=args.wait,
+            logs=args.wait,
+            dry_run=args.dry_run,
+        )
+
+    if args.dry_run:
+        print("\ndry run: request validated, nothing launched")
+        return
+
+    job = trainer._latest_training_job
+    print(f"\njob: {job.training_job_name}")
+    artifact = None
     if args.wait:
-        print(f"adapter artifacts: {estimator.model_data}")
+        job.refresh()
+        artifact = job.model_artifacts.s3_model_artifacts
+        print(f"status: {job.training_job_status}  artifact: {artifact}")
+    print_fetch_commands(job.training_job_name, artifact)
 
 
 if __name__ == "__main__":

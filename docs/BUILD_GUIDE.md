@@ -18,7 +18,7 @@ Each phase produces something visible/testable before you move on. Don't skip ah
   - Rejected: **Llama-3.1-8B** (strictly dominated — worse tokenizer *and* weaker Chinese); **XLM-R token tagging** (BIO can't represent free-text aspects with overlapping multi-clause opinions, let alone 4 slots); **mT5/GAS seq2seq**, the academic ACOS default (weaker colloquial Cantonese and format control, no offsetting gain).
   - **Sharp edge:** Qwen3 is a hybrid-thinking model whose template injects an empty `<think></think>` block when thinking is off. Training and inference must render the prompt identically or quality drops in a way that looks like a bad adapter. `ml/training/prompt_format.py` is the single source of truth, and `train.py` writes a `prompt_contract.json` next to the adapter to assert against.
   - Chosen deliberately over a 1.5-3B model to get real LoRA-on-a-real-sized-model experience and a stronger quality ceiling; the tradeoff is higher serving cost/latency later. **Qwen3-4B-Instruct-2507** is trained alongside as the cost/quality baseline, so the model card reports a measured tradeoff rather than an assumed one.
-- [ ] AWS account set up, since fine-tuning will run on SageMaker (see Phase 5)
+- [ ] AWS account set up for SageMaker training (see Phase 5a for the full setup list)
 
 **Checkpoint**: `docker run` a "hello world" FastAPI container locally, confirm it runs. Don't touch cloud yet.
 
@@ -109,51 +109,79 @@ below resumes with Phase 3.
 
 ## Phase 5 — Fine-tune the generative model (1-1.5 weeks, most of it waiting on training runs)
 
-Two stages, both deliberate — they share `prompt_format.py`, so both frameworks train on
-byte-identical token sequences (verified: 500/500 identical between the HF and MLX tokenizers).
+**Scope:** synthetic data + SageMaker now → scraped real data + SageMaker later (Phases 3-4).
+Always **QLoRA** — a frozen 4-bit base with trained LoRA adapters, never full fine-tuning.
 
-### 5a — Local QLoRA on the M5 via MLX (now)
-
-- [x] Trim the system prompt 304 → 148 tokens. Mean example 627 → 471 tokens (−25% compute on
-  every step and every inference call); all 4,498 examples now fit in 1,024 tokens.
-- [x] 4-bit conversion from the official Qwen weights, identical settings for both models:
-  `mlx_lm.convert --hf-path <repo> --mlx-path ml/models/<name> -q --q-bits 4 --q-group-size 64 --q-mode affine`
-  (Qwen3-8B 4.3GB, Qwen3-4B-Instruct-2507 2.1GB). With huggingface_hub 1.32, run
-  `snapshot_download(<repo>)` first — mlx-lm's save step otherwise fails on an incomplete cache.
-- [x] `ml/training/train_mlx.py` — uses mlx-lm's trainer directly, not the `mlx_lm.lora` CLI,
-  because four CLI defaults silently diverge from the PyTorch run (read from mlx-lm 0.31.3
-  source): its chat dataset omits `enable_thinking=False` (Qwen3 would learn to emit an empty
-  `<think>` block), its batcher silently truncates over-length JSON targets, LoRA goes on only
-  the last 16 layers, and `scale` defaults to 20 where our PEFT alpha/rank is 2.0.
-- [x] Smoke test (Qwen3-0.6B, 400 examples, 25 optimizer steps): val loss 0.77 → 0.19, JSON
-  parse rate 0 → 0.81, verbatim span rate 0.98.
-- [x] Measured throughput: 4B **0.556 it/s, 5.0GB peak**; 8B **0.283 it/s, 7.8GB peak**.
-  2 epochs ≈ 5h (4B) / 9.5h (8B). The M5 Air is fanless, so expect sustained runs to throttle
-  below these short-run numbers; keep it plugged in with the lid open (`caffeinate -dims`).
-- [ ] Train 4B, then 8B, identical hyperparameters. Decide the 8B's epoch count from the 4B's
-  val curve — if val loss has flattened by the end of epoch 1, the 8B's second epoch isn't worth
-  ~5 more hours.
-
-### 5b — PyTorch/PEFT on SageMaker (deferred scale-up)
+### Shared foundation (both training paths)
 
 - [x] `ml/training/prepare_dataset.py` — normalizes the raw synthetic set into span-verified ACOS quads and writes stratified train/val/synthetic_test splits. Enforces one invariant: **every emitted `opinion` is either the original label verbatim or a punctuation-delimited fragment of it, verbatim** — nothing synthesized. 23,908 raw labels → 35,390 quads (+48%), 5,000/5,000 reviews retained, 0 verbatim violations. (Whitespace is also a clause boundary when every part is CJK — casual Cantonese uses spaces for punctuation.)
 - [x] `ml/training/verify_dataset.py` — independent audit (re-declares the schema rather than importing it, so a bug in the normalizer can't validate itself): verbatim spans, split leakage, stratification.
-- [ ] Set up a SageMaker execution role (IAM) with S3 read/write and ECR pull permissions
-- [x] `ml/training/train.py` — LoRA fine-tune via PEFT on Qwen3-8B. One script for every environment: reads `SM_CHANNEL_*` / `SM_MODEL_DIR` when present, local paths otherwise. Key detail is **completion-only loss masking** (prompt tokens set to `-100`) — training on the prompt spends most of the gradient reproducing review text the model already sees. Over-length examples are dropped, never truncated, since a truncated target is malformed JSON.
-- [x] `ml/training/launch_sagemaker.py` — thin PyTorch-estimator wrapper around the same `train.py`.
-- [ ] Instance choice: `ml.g5.2xlarge` (A10G, 24GB) for standard runs; `ml.g5.12xlarge` or `ml.p4d.24xlarge` (A100, 40GB+) if you want faster iteration or larger batch sizes
-- [ ] If you hit OOM, lower `per_device_train_batch_size` before anything else and buy the effective batch back with `gradient_accumulation_steps`. Qwen's vocab is 151,936 tokens, so the logits tensor (batch × seq × vocab) dominates memory rather than the weights — at seq 1024 that is ~1.2GB per copy in bf16, before the loss upcasts to fp32. This is why the local smoke test needs `--batch-size 1` even on a 0.5B model.
-- [ ] Log to W&B: loss curves, hyperparameters, LoRA rank/alpha, learning rate, plus two
-  generation-based metrics that loss cannot see — **`eval_json_parse_rate`** and
-  **`eval_span_verbatim_rate`** (is the model copying spans, or inventing them?). A falling loss
-  with a flat verbatim rate means it's learning the format and hallucinating the content.
-- [ ] Start with a small SageMaker run (1 epoch, subset of data) to confirm the training script + container + S3 I/O all work end-to-end before committing to a full run — debugging a failed SageMaker job is slower than local, so validate the pipeline cheaply first
-- [ ] Run 2-3 hyperparameter variants (learning rate, LoRA rank) as separate SageMaker jobs, compare via W&B
-- [ ] Checkpoints land in S3 automatically via the SageMaker training job output path
+- [x] `ml/training/prompt_format.py` — the single definition of prompt, target, tokenization and generation metrics, imported by both trainers so they train on byte-identical sequences (500/500 identical between the HF and MLX tokenizers). System prompt trimmed 304 → 148 tokens: mean example 627 → 471 tokens, −25% compute on every step and every inference call.
+- [x] Completion-only loss masking — prompt tokens are excluded, so the gradient goes to the JSON target rather than to reproducing review text. Over-length examples are dropped, never truncated, since a truncated target is malformed JSON.
 
-**Checkpoint**: A saved LoRA checkpoint in S3, training curves logged, loss decreasing sensibly (not flat, not diverging). Bonus resume line: you now have hands-on SageMaker training job experience (IAM roles, S3 data flow, instance selection) in addition to the fine-tuning itself.
+### 5a — PyTorch/PEFT on SageMaker (main path, now)
 
-**Cost note**: `g5.2xlarge` runs roughly $1.20-1.50/hr on-demand. A LoRA run on a few thousand examples for 2-3 epochs is typically a few hours — expect $5-20 per experiment, ~$50-100 total across your sweep.
+**Why 14B is the ceiling on `ml.g5.2xlarge` (A10G, 24GB, $1.515/hr).** QLoRA memory at the
+longest example (902 tokens, batch 1), computed from the real Qwen3 configs:
+
+| Model | Full fine-tune | LoRA (bf16 base) | **QLoRA** |
+|---|---|---|---|
+| 4B | 64 GB | 12.2 GB | **6.8 GB** |
+| 8B | 131 GB | 21.0 GB | **10.7 GB** |
+| 14B | 236 GB | 35.0 GB | **15.4 GB** |
+| 32B | 524 GB | 73.5 GB | **27.2 GB** |
+
+Conservative by ~2-3 GB versus measured MLX peaks. 32B needs a 48 GB GPU even under QLoRA.
+
+- [x] `train.py` — per-epoch eval and checkpoint (adapter weights only), every epoch kept, best
+  by **synthetic** val loss loaded at the end; post-training predictions on each test file,
+  written in `evaluate.py`'s cache format; W&B key read from Secrets Manager by name; gradient
+  accumulation derived from `effective_batch_size: 16`.
+- [x] `launch_sagemaker.py` — rewritten for **SageMaker Python SDK v3** (`ModelTrainer`; the v2
+  `PyTorch` estimator is gone). PyTorch **2.10** training container — the newest available;
+  `2.14`, which the old launcher asked for, doesn't exist. torch is unpinned in
+  `requirements.txt` so the container's CUDA build runs. Separate `train`/`val`/`eval` channels,
+  so the training container never receives test data. `--dry-run` validates a request for free;
+  `--max-hours` caps runtime so a hung job can't bill indefinitely.
+- [ ] AWS setup: GPU quota *"ml.g5.2xlarge for training job usage"* → 1 (request first — can take
+  days), `aws login --region us-east-1` as an IAM user, $50/month budget alarm, execution role
+  (`AmazonSageMakerFullAccess` + `GetSecretValue` on the W&B secret), W&B key in Secrets Manager.
+- [ ] Smoke job: Qwen3-0.6B, 200 examples — container, requirements, bitsandbytes on real CUDA,
+  S3 channels, W&B, and the `model.tar.gz` → local `evaluate.py` round trip.
+- [ ] 14B smoke: 64 examples — confirms it fits and measures real it/s before any full run.
+- [ ] Sweep: 4B → 8B → 14B, 3 epochs each, identical hyperparameters. If the 4B's per-epoch
+  curve shows epoch 3 hurting, cut the others to 2.
+- [ ] Watch `eval_json_parse_rate` and `eval_span_verbatim_rate` in W&B, not just loss. A falling
+  loss with a flat verbatim rate means the model learned the JSON shape while inventing content.
+- [ ] Out of scope for now: spot instances (need checkpoint-resume; worth it only once runs get
+  expensive), hyperparameter variants, 32B.
+
+**Checkpoint**: three adapters in S3 with per-epoch checkpoints, training curves in W&B, cached
+predictions for both test sets. Resume line: SageMaker training jobs end to end — IAM execution
+role, S3 channels, container selection, Secrets Manager, cost caps.
+
+**Cost**: estimated ~$25-40 for the whole sweep (from ~6 × params FLOPs/token at an effective
+15-30 TFLOPS). The 14B smoke job replaces this estimate with a measurement.
+
+### 5b — Local QLoRA via MLX (verified alternative)
+
+Built and verified first, then superseded as the main path: too slow for the sweep, and 14B is
+out of reach locally. Kept for quick local experiments and local inference of 4-bit models.
+
+- [x] 4-bit conversion from the official Qwen weights, identical settings for every model:
+  `mlx_lm.convert --hf-path <repo> --mlx-path ml/models/<name> -q --q-bits 4 --q-group-size 64 --q-mode affine`.
+  With huggingface_hub 1.32, run `snapshot_download(<repo>)` first — mlx-lm's save step
+  otherwise fails on an incomplete cache.
+- [x] `train_mlx.py` uses mlx-lm's trainer directly, not the `mlx_lm.lora` CLI, because four CLI
+  defaults silently diverge from the PyTorch run (read from mlx-lm 0.31.3 source): its chat
+  dataset omits `enable_thinking=False` (Qwen3 would learn to emit an empty `<think>` block), its
+  batcher silently truncates over-length JSON targets, LoRA goes on only the last 16 layers, and
+  `scale` defaults to 20 where our PEFT alpha/rank is 2.0.
+- [x] Smoke test (Qwen3-0.6B, 25 optimizer steps): val loss 0.77 → 0.19, JSON parse rate
+  0 → 0.81, verbatim span rate 0.98.
+- [x] Measured on the M5 MacBook Air: 4B **0.556 it/s, 5.0GB peak**; 8B **0.283 it/s, 7.8GB
+  peak** — ~2.25h per epoch for the 4B, which is what moved the main runs to SageMaker.
+- MLX and PEFT adapters aren't interchangeable.
 
 ---
 

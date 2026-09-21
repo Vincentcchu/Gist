@@ -20,13 +20,16 @@ Cantonese-English code-switching). Portfolio project targeting applied ML Engine
   of higher serving latency/cost later (tracked in the model card, not hidden).
   Note Qwen3 is a hybrid-thinking model — the chat template must be identical
   between training and inference (see `ml/training/prompt_format.py`).
-- Training, two deliberate paths sharing one tokenizer (`prompt_format.py`):
-  - **Now — local MLX QLoRA** on the M5 MacBook Air (24GB): `ml/training/train_mlx.py`
-    on 4-bit models converted with `mlx_lm.convert`. Measured: 4B 0.56 it/s / 5.0GB,
-    8B 0.28 it/s / 7.8GB peak.
-  - **Later — PyTorch/PEFT on SageMaker** (`train.py`, `launch_sagemaker.py`):
-    `ml.g5.2xlarge` (A10G, 24GB) default. Deferred, not cancelled — having both
-    frameworks is intentional experience, not duplication.
+- Training: QLoRA (4-bit frozen base + LoRA adapters), never full fine-tuning. Two
+  paths sharing one tokenizer (`prompt_format.py`), so both train on identical sequences:
+  - **Main — PyTorch/PEFT on SageMaker** (`train.py`, `launch_sagemaker.py`, SDK v3):
+    `ml.g5.2xlarge` (A10G, 24GB), PyTorch 2.10 training container, us-east-1. Model
+    lineup **Qwen3-4B / 8B / 14B** — 14B is the ceiling on 24GB even under QLoRA (32B
+    needs ~25GB+); 32B is a follow-up only if 8B→14B measurably shrinks the
+    synthetic-vs-real gap.
+  - **Local alternative — MLX** (`train_mlx.py`) on the M5 MacBook Air: built and
+    verified, too slow for the main runs (4B 0.56 it/s, 8B 0.28 it/s). MLX and PEFT
+    adapters aren't interchangeable.
 - Experiment tracking: Weights & Biases
 - Deployment: Docker containers, no Kubernetes/Terraform for the app layer
 
@@ -40,14 +43,15 @@ Cantonese-English code-switching). Portfolio project targeting applied ML Engine
   explicit/readable code over clever code
 
 ## Current phase
-Phase 5 — training on the **synthetic set only**, locally via MLX. Span-verified
-ACOS quads in `ml/data/processed/`; the real test set (50 hand-labeled OpenRice
-reviews) in `ml/data/real/`.
+Phase 5 — QLoRA sweep on the **synthetic set** via SageMaker. Span-verified ACOS
+quads in `ml/data/processed/`; a 50-review real test set (hand-labeled, eval-only)
+in `ml/data/real/`.
 
-**Scope decision:** Phases 3-4 (teacher-labeling real reviews) are *deferred*,
-not skipped — scraping real reviews proved harder than planned, so the product
-gets built end to end on synthetic data first and data quality is upgraded
-afterwards. Consequences to keep honest in the model card:
+**Scope:** synthetic data + SageMaker now → scraped real data + SageMaker later.
+Phases 3-4 (teacher-labeling real reviews) are deferred, not skipped — scraping
+real reviews proved harder than planned, so the product gets built end to end on
+synthetic data first and data quality is upgraded afterwards. Consequences to
+keep honest in the model card:
 - Training data is 100% synthetic. The hand-labeled real set is eval-only.
 - Headline numbers are the synthetic-vs-real *gap*, never synthetic F1 alone.
 - The scraper has known defects: 富臨飯店 reviews are truncated previews
