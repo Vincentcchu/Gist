@@ -2,7 +2,8 @@
 #   train.py      PyTorch/PEFT, CUDA (SageMaker, rented GPUs)
 #   train_mlx.py  MLX, local QLoRA on Apple silicon
 # Everything outside the `mlx:` section is shared, so the two runs can't drift apart on
-# hyperparameters. Step counts (logging/eval/save, warmup) are in OPTIMIZER steps for both.
+# hyperparameters. Evaluation and checkpointing happen once per epoch in both; logging counts
+# OPTIMIZER steps.
 
 model_id: Qwen/Qwen3-8B
 max_seq_len: 1024
@@ -22,19 +23,21 @@ lora:
     - down_proj
 
 training:
-  epochs: 2
+  # 3, not 2, so the per-epoch checkpoints can show whether epoch 3 still helps rather than
+  # assuming it. The best epoch by synthetic val loss becomes the final adapter.
+  epochs: 3
   learning_rate: 1.0e-4
-  # Qwen's vocab is 151,936 tokens, so the logits tensor (batch x seq x vocab) dominates
-  # memory, not the weights: at seq 1024 that is ~1.2GB per copy in bf16 before the loss
-  # upcasts it to fp32. Keep the per-device batch small and buy the effective batch back
-  # with accumulation.
+  # What the optimizer sees. Gradient accumulation is derived as effective / micro-batch, so
+  # each model can use the largest micro-batch its memory allows (--batch-size) without
+  # changing the optimization.
+  effective_batch_size: 16
+  # Default micro-batch. Qwen's vocab is 151,936 tokens, so the logits tensor
+  # (batch x seq x vocab) dominates activation memory - ~0.3GB per example at seq 1024 in
+  # bf16, before the loss upcasts it to fp32.
   per_device_train_batch_size: 2
-  gradient_accumulation_steps: 8
   warmup_ratio: 0.03
   lr_scheduler_type: cosine
   logging_steps: 10
-  eval_steps: 100
-  save_steps: 200
 
 # bitsandbytes 4-bit, train.py on CUDA only. The MLX path quantizes ahead of time instead
 # (see mlx.model_path).
@@ -48,6 +51,13 @@ generation_eval:
   num_samples: 16
   max_new_tokens: 512
 
+# After training, train.py generates on every test file and writes predictions in the cache
+# format evaluate.py --from-predictions reads. Gold targets top out at 438 tokens; 768 leaves
+# room without letting a repetition loop run for thousands of tokens.
+prediction:
+  batch_size: 8
+  max_new_tokens: 768
+
 wandb:
   enabled: true
   project: review-absa
@@ -57,11 +67,8 @@ mlx:
   # mlx_lm.convert command. Both models are quantized identically so the 8B-vs-4B comparison
   # isolates model size.
   model_path: ml/models/qwen3-8b-4bit
-  # Micro-batch 1 x accumulation 16 = effective batch 16, the same as training above
-  # (2 x 8). train_mlx.py refuses to run if the two products differ, since the runs would no
-  # longer be comparable.
+  # Micro-batch; accumulation is derived from training.effective_batch_size, same as train.py.
   batch_size: 1
-  gradient_accumulation_steps: 16
   # mlx-lm defaults to LoRA on only the last 16 layers; PEFT adapts every layer. -1 = all.
   num_layers: -1
   grad_checkpoint: true

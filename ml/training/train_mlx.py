@@ -101,18 +101,17 @@ def build_dataset(
     return kept
 
 
-def check_effective_batch(config: dict[str, Any]) -> None:
-    shared = config["training"]
-    mlx_cfg = config["mlx"]
-    pytorch_batch = (
-        shared["per_device_train_batch_size"] * shared["gradient_accumulation_steps"]
-    )
-    mlx_batch = mlx_cfg["batch_size"] * mlx_cfg["gradient_accumulation_steps"]
-    if pytorch_batch != mlx_batch:
+def gradient_accumulation(effective_batch: int, micro_batch: int) -> int:
+    """Derive accumulation so the optimizer always sees training.effective_batch_size.
+
+    Both trainers derive it the same way, so their runs stay comparable whatever micro-batch
+    each one's memory allows.
+    """
+    if effective_batch % micro_batch:
         raise ValueError(
-            f"Effective batch differs between frameworks (PyTorch {pytorch_batch}, MLX "
-            f"{mlx_batch}); the runs would not be comparable. Fix config.yaml."
+            f"micro-batch {micro_batch} doesn't divide effective batch {effective_batch}"
         )
+    return effective_batch // micro_batch
 
 
 def lora_keys(model: nn.Module, target_modules: list[str]) -> set[str]:
@@ -295,7 +294,6 @@ def parse_args() -> argparse.Namespace:
 def main() -> None:
     args = parse_args()
     config = yaml.safe_load(args.config.read_text())
-    check_effective_batch(config)
 
     mlx_cfg = config["mlx"]
     shared = config["training"]
@@ -307,7 +305,7 @@ def main() -> None:
         else float(shared["learning_rate"])
     )
     batch_size = mlx_cfg["batch_size"]
-    grad_accum = mlx_cfg["gradient_accumulation_steps"]
+    grad_accum = gradient_accumulation(shared["effective_batch_size"], batch_size)
 
     set_seed(config["seed"])
     args.output_dir.mkdir(parents=True, exist_ok=True)
@@ -377,14 +375,16 @@ def main() -> None:
         wandb_run=wandb_run,
     )
 
-    # config.yaml counts logging/eval/save in optimizer steps; mlx-lm counts iters.
+    # mlx-lm counts iters (micro-batches). Logging is configured in optimizer steps; eval and
+    # checkpoints happen once per epoch, matching train.py.
+    iters_per_epoch = math.ceil(len(train_set) / batch_size)
     training_args = TrainingArgs(
         batch_size=batch_size,
         iters=iters,
         val_batches=min(mlx_cfg["val_batches"], len(val_set)),
         steps_per_report=shared["logging_steps"] * grad_accum,
-        steps_per_eval=shared["eval_steps"] * grad_accum,
-        steps_per_save=shared["save_steps"] * grad_accum,
+        steps_per_eval=iters_per_epoch,
+        steps_per_save=iters_per_epoch,
         max_seq_length=config["max_seq_len"],
         adapter_file=str(args.output_dir / "adapters.safetensors"),
         grad_checkpoint=mlx_cfg["grad_checkpoint"],

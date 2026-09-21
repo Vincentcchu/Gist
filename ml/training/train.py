@@ -6,7 +6,15 @@ on a laptop, a rented GPU, or a SageMaker training job with no branching.
 
 Local smoke test on Apple silicon (verified end to end):
     python ml/training/train.py --model-id Qwen/Qwen2.5-0.5B-Instruct \\
-        --max-examples 50 --epochs 1 --batch-size 1 --no-wandb
+        --max-examples 30 --epochs 2 --batch-size 1 --no-wandb
+
+What a run produces in the output dir (SM_MODEL_DIR on SageMaker, so it all lands in
+model.tar.gz):
+    adapter_model.safetensors, adapter_config.json   the best epoch, by synthetic val loss
+    checkpoints/checkpoint-*/                          every epoch's adapter, for comparison
+    prompt_contract.json                               exact rendered prompt, for serving
+    eval/<test set>.predictions.jsonl                  generations on each test file, in the
+                                                       format evaluate.py --from-predictions reads
 
 `--batch-size 1` is not optional on MPS. Qwen's 151,936-token vocabulary makes the logits
 tensor (batch x seq x vocab) the memory bottleneck rather than the weights, and batch 4 at
@@ -56,6 +64,18 @@ def resolve_paths(args: argparse.Namespace) -> tuple[Path, Path, Path]:
     val_dir = Path(os.environ.get("SM_CHANNEL_VAL", args.data_dir))
     output_dir = Path(os.environ.get("SM_MODEL_DIR", args.output_dir))
     return data_dir / "train.jsonl", val_dir / "val.jsonl", output_dir
+
+
+def resolve_eval_files(args: argparse.Namespace) -> list[Path]:
+    """Test files to generate predictions for after training.
+
+    On SageMaker, every .jsonl in the `eval` channel; locally, --eval-files that exist.
+    Only review text is read, so an unlabeled real test set works fine here.
+    """
+    channel = os.environ.get("SM_CHANNEL_EVAL")
+    if channel:
+        return sorted(Path(channel).glob("*.jsonl"))
+    return [path for path in args.eval_files if path.exists()]
 
 
 def set_seed(seed: int) -> None:
@@ -160,6 +180,99 @@ class GenerationEval(TrainerCallback):
             self.model.train()
 
 
+def gradient_accumulation(effective_batch: int, micro_batch: int) -> int:
+    """Derive accumulation so the optimizer always sees training.effective_batch_size.
+
+    Each model can then use the largest micro-batch its memory allows (--batch-size) without
+    changing the optimization. train_mlx.py derives it the same way.
+    """
+    if effective_batch % micro_batch:
+        raise ValueError(
+            f"micro-batch {micro_batch} doesn't divide effective batch {effective_batch}"
+        )
+    return effective_batch // micro_batch
+
+
+def load_wandb_key() -> None:
+    """On SageMaker, fetch the W&B key from Secrets Manager into the environment.
+
+    The launcher passes only the secret's *name*. The key itself never appears in the repo, the
+    job definition (visible to anyone who can describe the job), or the logs.
+    """
+    secret_name = os.environ.get("WANDB_SECRET_NAME")
+    if os.environ.get("WANDB_API_KEY") or not secret_name:
+        return
+    import boto3
+
+    secret = boto3.client("secretsmanager").get_secret_value(SecretId=secret_name)
+    os.environ["WANDB_API_KEY"] = secret["SecretString"].strip()
+
+
+def generate_batch(
+    model: Any, tokenizer: Any, texts: list[str], max_new_tokens: int
+) -> list[str]:
+    """Greedy generation for several reviews at once.
+
+    Left padding keeps every prompt's last token adjacent to where generation starts; with right
+    padding the shorter prompts would continue from pad tokens.
+    """
+    previous_side = tokenizer.padding_side
+    tokenizer.padding_side = "left"
+    try:
+        inputs = tokenizer(
+            [render_prompt(tokenizer, text) for text in texts],
+            return_tensors="pt",
+            padding=True,
+            add_special_tokens=False,
+        ).to(model.device)
+        with torch.no_grad():
+            output = model.generate(
+                **inputs,
+                max_new_tokens=max_new_tokens,
+                do_sample=False,
+                pad_token_id=tokenizer.pad_token_id,
+            )
+    finally:
+        tokenizer.padding_side = previous_side
+    return tokenizer.batch_decode(
+        output[:, inputs["input_ids"].shape[1] :], skip_special_tokens=True
+    )
+
+
+def write_predictions(
+    model: Any,
+    tokenizer: Any,
+    eval_files: list[Path],
+    output_dir: Path,
+    batch_size: int,
+    max_new_tokens: int,
+    limit: int | None,
+) -> None:
+    """Generate on each test file and save in evaluate.py's prediction-cache format.
+
+    Scoring happens later, locally: `evaluate.py --adapter <run> --from-predictions`. Nothing
+    here looks at labels, so no decision is ever made on the test sets.
+    """
+    model.eval()
+    eval_dir = output_dir / "eval"
+    eval_dir.mkdir(parents=True, exist_ok=True)
+    for path in eval_files:
+        texts = [example["text"] for example in read_jsonl(path)][:limit]
+        outputs: list[str] = []
+        for start in range(0, len(texts), batch_size):
+            outputs.extend(
+                generate_batch(
+                    model, tokenizer, texts[start : start + batch_size], max_new_tokens
+                )
+            )
+            print(f"  predictions {path.stem}: {len(outputs)}/{len(texts)}", flush=True)
+        with (eval_dir / f"{path.stem}.predictions.jsonl").open(
+            "w", encoding="utf-8"
+        ) as handle:
+            for output in outputs:
+                handle.write(json.dumps({"output": output}, ensure_ascii=False) + "\n")
+
+
 def compute_warmup_steps(
     num_examples: int, batch_size: int, grad_accum: int, epochs: float, ratio: float
 ) -> int:
@@ -223,6 +336,17 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--config", type=Path, default=CONFIG_PATH)
     parser.add_argument("--data-dir", type=str, default="ml/data/processed")
     parser.add_argument("--output-dir", type=str, default="ml/outputs/run")
+    parser.add_argument(
+        "--eval-files",
+        type=Path,
+        nargs="*",
+        default=[
+            Path("ml/data/processed/synthetic_test.jsonl"),
+            Path("ml/data/real/real_test.jsonl"),
+        ],
+        help="test files to predict on after training (SageMaker uses the eval channel)",
+    )
+    parser.add_argument("--run-name", type=str, default=None, help="W&B run name")
     parser.add_argument("--model-id", type=str, default=None)
     parser.add_argument("--epochs", type=float, default=None)
     parser.add_argument("--learning-rate", type=float, default=None)
@@ -246,6 +370,7 @@ def main() -> None:
         else float(train_cfg["learning_rate"])
     )
     batch_size = args.batch_size or train_cfg["per_device_train_batch_size"]
+    grad_accum = gradient_accumulation(train_cfg["effective_batch_size"], batch_size)
 
     set_seed(config["seed"])
     train_path, val_path, output_dir = resolve_paths(args)
@@ -254,6 +379,7 @@ def main() -> None:
     use_wandb = config["wandb"]["enabled"] and not args.no_wandb
     if use_wandb:
         os.environ.setdefault("WANDB_PROJECT", config["wandb"]["project"])
+        load_wandb_key()
 
     print(f"model: {model_id}")
     print(f"train: {train_path}\nval:   {val_path}\nout:   {output_dir}")
@@ -279,7 +405,7 @@ def main() -> None:
     warmup_steps = compute_warmup_steps(
         num_examples=len(train_ds),
         batch_size=batch_size,
-        grad_accum=train_cfg["gradient_accumulation_steps"],
+        grad_accum=grad_accum,
         epochs=epochs,
         ratio=train_cfg["warmup_ratio"],
     )
@@ -290,14 +416,24 @@ def main() -> None:
             num_train_epochs=epochs,
             learning_rate=lr,
             per_device_train_batch_size=batch_size,
-            gradient_accumulation_steps=train_cfg["gradient_accumulation_steps"],
+            gradient_accumulation_steps=grad_accum,
             warmup_steps=warmup_steps,
             lr_scheduler_type=train_cfg["lr_scheduler_type"],
             logging_steps=train_cfg["logging_steps"],
-            eval_strategy="steps",
-            eval_steps=train_cfg["eval_steps"],
-            save_steps=train_cfg["save_steps"],
-            save_total_limit=2,
+            # One eval and one checkpoint per epoch, all kept: whether epoch 2 or 3 helped is
+            # then answered by the checkpoints rather than guessed. The final adapter is the
+            # best epoch by *synthetic* val loss - a legitimate selection signal; the test
+            # sets are never consulted.
+            eval_strategy="epoch",
+            save_strategy="epoch",
+            save_total_limit=None,
+            load_best_model_at_end=True,
+            metric_for_best_model="eval_loss",
+            greater_is_better=False,
+            # Adapter weights only - the optimizer state would add ~1.5GB per checkpoint on
+            # the 14B, all of it shipped back in model.tar.gz for nothing.
+            save_only_model=True,
+            run_name=args.run_name,
             bf16=on_cuda,
             gradient_checkpointing=on_cuda,
             report_to="wandb" if use_wandb else "none",
@@ -324,11 +460,29 @@ def main() -> None:
         )
 
     trainer.train()
+    print(
+        f"\nbest checkpoint: {trainer.state.best_model_checkpoint} "
+        f"(eval_loss {trainer.state.best_metric})"
+    )
 
     model.save_pretrained(output_dir)
     tokenizer.save_pretrained(output_dir)
     save_prompt_contract(output_dir, tokenizer)
-    print(f"\nadapter + tokenizer + prompt contract saved to {output_dir}")
+    print(f"adapter + tokenizer + prompt contract saved to {output_dir}")
+
+    eval_files = resolve_eval_files(args)
+    if eval_files:
+        pred_cfg = config["prediction"]
+        print(f"\ngenerating predictions for {[p.name for p in eval_files]}")
+        write_predictions(
+            model,
+            tokenizer,
+            eval_files,
+            output_dir,
+            batch_size=pred_cfg["batch_size"],
+            max_new_tokens=pred_cfg["max_new_tokens"],
+            limit=max(4, args.max_examples // 10) if args.max_examples else None,
+        )
 
 
 if __name__ == "__main__":

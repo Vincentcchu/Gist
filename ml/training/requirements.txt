@@ -1,16 +1,25 @@
-# Resolved and smoke-tested on macOS arm64 / Python 3.13 (conda env `gist`).
+# Installed inside the SageMaker training container (source_code.requirements) and used locally.
+#
+# torch is deliberately NOT pinned: the SageMaker PyTorch 2.10 container (py313, CUDA 13.0)
+# ships its own CUDA build, and pinning a different version here would make every job
+# reinstall torch over it. Locally, the `gist` env has torch 2.14.0 installed directly.
+#
 # transformers 5.x renamed two things this code depends on: `torch_dtype` -> `dtype` on
 # from_pretrained, and TrainingArguments dropped `warmup_ratio` for `warmup_steps`.
 # Do not relax the transformers pin below 5.x without reverting those.
-torch==2.14.0
 transformers==5.17.0
 peft==0.21.0
 accelerate==1.15.0
-datasets==5.0.1
 wandb==0.30.0
 pyyaml==6.0.3
 numpy==2.5.3
 
-# CUDA-only. Absent on Mac, so local runs fall back to full-precision LoRA (see train.py).
-# Unverified locally for that reason - confirm on the first GPU run.
+# CUDA-only 4-bit quantization for QLoRA. First verified by the SageMaker smoke job.
 bitsandbytes==0.50.2 ; platform_system == "Linux"
+
+# Local QLoRA on Apple silicon (train_mlx.py). Never installed in the Linux container.
+mlx==0.32.2 ; platform_system == "Darwin"
+mlx-lm==0.31.3 ; platform_system == "Darwin"
+
+# The launcher (launch_sagemaker.py) runs on your laptop only and needs sagemaker==3.22.1,
+# installed separately - it has no place inside the training container.
