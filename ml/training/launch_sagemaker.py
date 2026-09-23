@@ -105,7 +105,9 @@ def hyperparameters(args: argparse.Namespace) -> dict[str, object]:
 def environment(args: argparse.Namespace) -> dict[str, str]:
     # The training container sets no default AWS region, so boto3 inside it (used to fetch
     # the W&B secret) has to be told. Without this the first smoke job died on NoRegionError.
-    env = {"AWS_DEFAULT_REGION": args.region}
+    # PYTHONUNBUFFERED: stdout to a pipe is block-buffered, so train.py's progress prints
+    # would sit invisible in CloudWatch until the buffer filled or the process exited.
+    env = {"AWS_DEFAULT_REGION": args.region, "PYTHONUNBUFFERED": "1"}
     if args.no_wandb:
         return {**env, "WANDB_MODE": "disabled"}
     # The secret's name, never the key: train.py fetches the value from Secrets Manager

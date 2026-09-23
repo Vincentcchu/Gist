@@ -253,6 +253,14 @@ def main() -> None:
         cache = eval_dir / f"{name}.predictions.jsonl"
         if args.from_predictions:
             outputs = [row["output"] for row in read_jsonl(cache)][: len(examples)]
+            if len(outputs) < len(examples):
+                # score() zips outputs with examples, so a short cache would silently score
+                # the first N reviews while counting gold quads from all of them.
+                raise SystemExit(
+                    f"{cache.name} has {len(outputs)} predictions but {path.name} has "
+                    f"{len(examples)} reviews. If the job was capped with --max-examples, "
+                    f"score it with --limit {len(outputs)}."
+                )
         else:
             if model is None:
                 model, tokenizer = load_model(args.adapter, args.model_path)

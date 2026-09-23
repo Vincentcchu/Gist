@@ -142,33 +142,33 @@ class GenerationEval(TrainerCallback):
         tokenizer: Any,
         examples: list[dict[str, Any]],
         max_new_tokens: int,
+        batch_size: int,
     ) -> None:
         self.trainer = trainer
         self.model = model
         self.tokenizer = tokenizer
         self.examples = examples
         self.max_new_tokens = max_new_tokens
-
-    def _generate(self, text: str) -> str:
-        inputs = self.tokenizer(
-            render_prompt(self.tokenizer, text), return_tensors="pt"
-        ).to(self.model.device)
-        with torch.no_grad():
-            output = self.model.generate(
-                **inputs,
-                max_new_tokens=self.max_new_tokens,
-                do_sample=False,
-                pad_token_id=self.tokenizer.pad_token_id,
-            )
-        return self.tokenizer.decode(
-            output[0][inputs["input_ids"].shape[1] :], skip_special_tokens=True
-        )
+        self.batch_size = batch_size
 
     def on_evaluate(self, args, state, control, metrics=None, **kwargs) -> None:
         was_training = self.model.training
         self.model.eval()
 
-        results = [(self._generate(e["text"]), e["text"]) for e in self.examples]
+        # Batched: on the first SageMaker smoke job, one-at-a-time generation cost ~27s per
+        # review against ~9s per review in batches of 8 - it runs every epoch, so it adds up.
+        texts = [example["text"] for example in self.examples]
+        outputs: list[str] = []
+        for start in range(0, len(texts), self.batch_size):
+            outputs.extend(
+                generate_batch(
+                    self.model,
+                    self.tokenizer,
+                    texts[start : start + self.batch_size],
+                    self.max_new_tokens,
+                )
+            )
+        results = list(zip(outputs, texts))
         self.trainer.log(
             {
                 f"eval_{name}": value
@@ -467,6 +467,7 @@ def main() -> None:
                 tokenizer=tokenizer,
                 examples=val_raw[: gen_cfg["num_samples"]],
                 max_new_tokens=gen_cfg["max_new_tokens"],
+                batch_size=config["prediction"]["batch_size"],
             )
         )
 
