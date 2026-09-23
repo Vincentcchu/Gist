@@ -25,3 +25,6 @@ scraper/*.html
 scraper/debug_screenshot.png
 
 .vscode/
+
+# Personal AWS/SageMaker learning log - kept locally, not published.
+docs/aws_sagemaker_log.md

@@ -5,7 +5,7 @@ This file runs on your laptop only:
 
     pip install sagemaker==3.22.1 "botocore[crt]"   # crt: needed for `aws login` credentials
     aws login --region us-east-1                      # as an IAM user, never root
-    export SAGEMAKER_ROLE_ARN=arn:aws:iam::533267363551:role/review-absa-sagemaker-training
+    export SAGEMAKER_ROLE_ARN=arn:aws:iam::<ACCOUNT_ID>:role/review-absa-sagemaker-training
 
 Validate the job request without launching anything (free):
     python ml/training/launch_sagemaker.py \\
