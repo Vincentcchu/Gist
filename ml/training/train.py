@@ -444,7 +444,9 @@ def main() -> None:
             # Adapter weights only - the optimizer state would add ~1.5GB per checkpoint on
             # the 14B, all of it shipped back in model.tar.gz for nothing.
             save_only_model=True,
-            run_name=args.run_name,
+            # On SageMaker, name the W&B run after the training job, so a dashboard curve
+            # can be traced to the job whose model.tar.gz it produced.
+            run_name=args.run_name or os.environ.get("TRAINING_JOB_NAME"),
             bf16=on_cuda,
             gradient_checkpointing=on_cuda,
             report_to="wandb" if use_wandb else "none",
