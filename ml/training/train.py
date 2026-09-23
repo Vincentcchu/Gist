@@ -476,6 +476,12 @@ def main() -> None:
         f"\nbest checkpoint: {trainer.state.best_model_checkpoint} "
         f"(eval_loss {trainer.state.best_metric})"
     )
+    if torch.cuda.is_available():
+        # How close this model came to the GPU's limit - the number that decides whether a
+        # larger model or micro-batch would fit.
+        total = torch.cuda.get_device_properties(0).total_memory
+        peak = torch.cuda.max_memory_allocated()
+        print(f"peak GPU memory: {peak / 1e9:.2f} GB of {total / 1e9:.2f} GB")
 
     model.save_pretrained(output_dir)
     tokenizer.save_pretrained(output_dir)
