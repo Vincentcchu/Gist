@@ -30,6 +30,11 @@ import shutil
 import tempfile
 from pathlib import Path
 
+from botocore.exceptions import (
+    ConnectionClosedError,
+    EndpointConnectionError,
+    ReadTimeoutError,
+)
 from sagemaker.core import image_uris
 from sagemaker.core.helper.session_helper import Session
 from sagemaker.core.training.configs import (
@@ -190,13 +195,30 @@ def main() -> None:
         environment=environment(args),
     )
 
+    watched_to_end = args.wait
     with tempfile.TemporaryDirectory() as staging:
-        trainer.train(
-            input_data_config=stage_channels(Path(staging)),
-            wait=args.wait,
-            logs=args.wait,
-            dry_run=args.dry_run,
-        )
+        try:
+            trainer.train(
+                input_data_config=stage_channels(Path(staging)),
+                wait=args.wait,
+                logs=args.wait,
+                dry_run=args.dry_run,
+            )
+        except (
+            ConnectionClosedError,
+            EndpointConnectionError,
+            ReadTimeoutError,
+        ) as error:
+            # --wait streams CloudWatch logs from this laptop for the whole run. If that
+            # connection drops, only the watcher is gone: once CreateTrainingJob succeeded,
+            # the job runs entirely on AWS and is unaffected.
+            if trainer._latest_training_job is None:
+                raise
+            print(
+                f"\nlost the connection while watching ({type(error).__name__}). "
+                "The job itself is unaffected and keeps running on AWS."
+            )
+            watched_to_end = False
 
     if args.dry_run:
         print("\ndry run: request validated, nothing launched")
@@ -204,8 +226,16 @@ def main() -> None:
 
     job = trainer._latest_training_job
     print(f"\njob: {job.training_job_name}")
+    if not watched_to_end:
+        print(
+            "follow it with:\n"
+            f"  aws sagemaker describe-training-job --training-job-name {job.training_job_name}"
+            " --query '[TrainingJobStatus,SecondaryStatus,FailureReason]'\n"
+            "  aws logs tail /aws/sagemaker/TrainingJobs"
+            f" --log-stream-name-prefix {job.training_job_name} --follow"
+        )
     artifact = None
-    if args.wait:
+    if watched_to_end:
         job.refresh()
         artifact = job.model_artifacts.s3_model_artifacts
         print(f"status: {job.training_job_status}  artifact: {artifact}")
