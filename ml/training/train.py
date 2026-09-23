@@ -427,6 +427,14 @@ def main() -> None:
             num_train_epochs=epochs,
             learning_rate=lr,
             per_device_train_batch_size=batch_size,
+            # Evaluate at the training micro-batch, which the run has already proven fits.
+            # The Trainer's default eval batch is 8: with Qwen's 151,936-token vocabulary the
+            # cross-entropy logits alone are ~4.4GB at 8 x 900 tokens, and the 8B ran out of
+            # GPU memory in its first end-of-epoch eval after training fine all epoch.
+            per_device_eval_batch_size=batch_size,
+            # Evaluation only needs the loss (generation metrics come from GenerationEval),
+            # so never hold on to the logits.
+            prediction_loss_only=True,
             gradient_accumulation_steps=grad_accum,
             warmup_steps=warmup_steps,
             lr_scheduler_type=train_cfg["lr_scheduler_type"],
