@@ -202,9 +202,20 @@ def load_wandb_key() -> None:
     secret_name = os.environ.get("WANDB_SECRET_NAME")
     if os.environ.get("WANDB_API_KEY") or not secret_name:
         return
+    # The SageMaker container sets no default AWS region, so boto3 can't guess one. The
+    # launcher passes it in; fail with a readable message rather than botocore's
+    # NoRegionError deep in a traceback (which is how the first smoke job died).
+    region = os.environ.get("AWS_REGION") or os.environ.get("AWS_DEFAULT_REGION")
+    if not region:
+        raise RuntimeError(
+            f"WANDB_SECRET_NAME is set but no AWS region is - set AWS_DEFAULT_REGION "
+            f"so the secret {secret_name!r} can be fetched"
+        )
     import boto3
 
-    secret = boto3.client("secretsmanager").get_secret_value(SecretId=secret_name)
+    secret = boto3.client("secretsmanager", region_name=region).get_secret_value(
+        SecretId=secret_name
+    )
     os.environ["WANDB_API_KEY"] = secret["SecretString"].strip()
 
 

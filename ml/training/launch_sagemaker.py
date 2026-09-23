@@ -103,11 +103,18 @@ def hyperparameters(args: argparse.Namespace) -> dict[str, object]:
 
 
 def environment(args: argparse.Namespace) -> dict[str, str]:
+    # The training container sets no default AWS region, so boto3 inside it (used to fetch
+    # the W&B secret) has to be told. Without this the first smoke job died on NoRegionError.
+    env = {"AWS_DEFAULT_REGION": args.region}
     if args.no_wandb:
-        return {"WANDB_MODE": "disabled"}
+        return {**env, "WANDB_MODE": "disabled"}
     # The secret's name, never the key: train.py fetches the value from Secrets Manager
     # inside the container, so it doesn't appear in the job definition.
-    return {"WANDB_PROJECT": "review-absa", "WANDB_SECRET_NAME": args.wandb_secret}
+    return {
+        **env,
+        "WANDB_PROJECT": "review-absa",
+        "WANDB_SECRET_NAME": args.wandb_secret,
+    }
 
 
 def print_fetch_commands(job_name: str, artifact_uri: str | None) -> None:
