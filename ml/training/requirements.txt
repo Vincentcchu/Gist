@@ -21,5 +21,6 @@ bitsandbytes==0.50.2 ; platform_system == "Linux"
 mlx==0.32.2 ; platform_system == "Darwin"
 mlx-lm==0.31.3 ; platform_system == "Darwin"
 
-# The launcher (launch_sagemaker.py) runs on your laptop only and needs sagemaker==3.22.1,
-# installed separately - it has no place inside the training container.
+# The launcher (launch_sagemaker.py) runs on your laptop only and needs sagemaker==3.22.1 and
+# botocore[crt] (the `aws login` credential provider requires it), installed separately - they
+# have no place inside the training container.

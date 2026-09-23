@@ -145,9 +145,16 @@ Conservative by ~2-3 GB versus measured MLX peaks. 32B needs a 48 GB GPU even un
   `requirements.txt` so the container's CUDA build runs. Separate `train`/`val`/`eval` channels,
   so the training container never receives test data. `--dry-run` validates a request for free;
   `--max-hours` caps runtime so a hung job can't bill indefinitely.
-- [ ] AWS setup: GPU quota *"ml.g5.2xlarge for training job usage"* → 1 (request first — can take
-  days), `aws login --region us-east-1` as an IAM user, $50/month budget alarm, execution role
-  (`AmazonSageMakerFullAccess` + `GetSecretValue` on the W&B secret), W&B key in Secrets Manager.
+- [x] AWS setup (us-east-1): GPU quota *"ml.g5.2xlarge for training job usage"* → 1 (approved);
+  IAM admin user `vincent-admin` for daily use (root has MFA and stays in the drawer), CLI via
+  `aws login` — the Python side needs `botocore[crt]` for those credentials; $50/month budget
+  alarm `review-absa-monthly`; execution role `review-absa-sagemaker-training`
+  (`AmazonSageMakerFullAccess` + `GetSecretValue` on the W&B secret only — verified with the IAM
+  policy simulator: that secret allowed, any other denied); W&B key in Secrets Manager as
+  `review-absa/wandb-api-key`, stored from a separate terminal so it never entered this repo or
+  a chat transcript.
+- [x] `--dry-run` validated a full job request against the account (image, role, channels,
+  output path) without launching anything.
 - [ ] Smoke job: Qwen3-0.6B, 200 examples — container, requirements, bitsandbytes on real CUDA,
   S3 channels, W&B, and the `model.tar.gz` → local `evaluate.py` round trip.
 - [ ] 14B smoke: 64 examples — confirms it fits and measures real it/s before any full run.

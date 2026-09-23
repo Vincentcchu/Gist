@@ -3,11 +3,12 @@
 A thin wrapper - all training logic lives in train.py, which runs identically here and locally.
 This file runs on your laptop only:
 
-    pip install sagemaker==3.22.1
-    aws login --region us-east-1
+    pip install sagemaker==3.22.1 "botocore[crt]"   # crt: needed for `aws login` credentials
+    aws login --region us-east-1                      # as an IAM user, never root
+    export SAGEMAKER_ROLE_ARN=arn:aws:iam::533267363551:role/review-absa-sagemaker-training
 
 Validate the job request without launching anything (free):
-    python ml/training/launch_sagemaker.py --role <execution-role-arn> \\
+    python ml/training/launch_sagemaker.py \\
         --model-id Qwen/Qwen3-0.6B --max-examples 200 --epochs 1 --dry-run
 
 Pipeline smoke test (~$0.50), then a 14B fit/speed check before any full run:
