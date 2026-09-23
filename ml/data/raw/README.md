@@ -7,7 +7,7 @@
 **Not tracked in git** (see `.gitignore`), so a fresh clone will not have it. Neither are the
 derived splits in `ml/data/processed/`.
 
-Canonical copy: _TODO: fill in where this is kept — it was generated outside this repo._
+Canonical copy: synthetic_review repo
 
 To rebuild everything from it, drop the file at this path and run:
 

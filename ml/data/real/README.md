@@ -3,8 +3,9 @@
 `real_test.jsonl` is the only evaluation data in this project that the model's training process
 didn't generate. Every "how good is it on real reviews" number comes from here. It is:
 
-- **Committed to git** (unlike every other `.jsonl` under `ml/data/`) — small, and hours of
-  hand work that can't be regenerated.
+- **Not in git.** It holds the full text of scraped OpenRice user reviews, which don't belong
+  in a public repo. That makes it a single point of failure once labeled — hours of hand work
+  that can't be regenerated — so **back it up yourself** (a private location, not this repo).
 - **Never used for training, tuning, or prompt iteration.** Look at it only to report final
   numbers. The moment it influences a decision, it stops measuring generalization.
 

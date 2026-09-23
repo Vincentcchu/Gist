@@ -91,8 +91,10 @@ Training data is currently 100% synthetic; the 312 scraped OpenRice reviews in t
 
 This step is what makes your eval numbers later actually mean something.
 
-**Done instead, for now:** a 50-review hand-labeled real test set, eval-only, committed at
-`ml/data/real/real_test.jsonl` (labeling rules and known limits in `ml/data/real/README.md`).
+**Done instead, for now:** a 50-review hand-labeled real test set, eval-only, at
+`ml/data/real/real_test.jsonl` — kept **out of git**, since it holds the full text of scraped
+OpenRice reviews and the repo is public (labeling rules and known limits in
+`ml/data/real/README.md`).
 `export_for_validation.py` builds the template: excludes truncated previews, strips scraped
 counters, stratifies by length tertile, and refuses to overwrite labeled work. Validate with
 `verify_dataset.py --files ml/data/real/real_test.jsonl`. The full teacher-validation flow

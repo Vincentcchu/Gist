@@ -15,10 +15,9 @@ wandb/
 
 # Datasets stay out of git. ml/data/raw/README.md documents the schema and provenance;
 # prepare_dataset.py regenerates every split from the raw file deterministically.
+# That includes ml/data/real/real_test.jsonl: it holds the full text of scraped OpenRice
+# user reviews, which don't belong in a public repo. Back it up yourself once labeled.
 ml/data/**/*.jsonl
-# ...except the hand-labeled real test set: small, irreplaceable, and every reported
-# eval number depends on it.
-!ml/data/real/real_test.jsonl
 
 # Scraper debugging scratch - page dumps and a CAPTCHA screenshot. The findings they
 # produced are written up in scraper/README.md, which is the part worth keeping.
