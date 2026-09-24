@@ -23,6 +23,13 @@ Partial views localize *where* the model fails:
 
 An unparseable output predicts nothing, so every gold quad in that review is a miss.
 
+Relaxed views (secondary - strict stays the headline): exact match is strict about span
+*boundaries*, which are partly arbitrary - 凍晒 against a gold 已經凍晒 is a total miss. The
+"(overlap)" views accept term and opinion spans that cover the same stretch of the review (at
+least half the shorter span), with category and polarity still exact, pairing predictions and gold
+one-to-one. On the synthetic test set this moves full-quad F1 by ~+22 points for every model while
+leaving their ranking unchanged: that difference is boundary disagreement, not error.
+
 Run it on synthetic_test and real_test side by side: the gap between them, not the synthetic
 number, is the finding.
 """
@@ -32,7 +39,7 @@ import json
 import sys
 from collections import Counter, defaultdict
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT / "ml" / "training"))
@@ -52,6 +59,14 @@ VIEWS = {
     "category+polarity": ("category", "polarity"),
     "full quad": FULL,
 }
+# Secondary views: term and opinion only need to overlap (see spans_overlap); category and
+# polarity must still be exact. Reported below the strict table, never instead of it.
+RELAXED_VIEWS = {
+    "term (overlap)": ("term",),
+    "full quad (overlap)": FULL,
+}
+SPAN_FIELDS = {"term", "opinion"}
+NULL = "NULL"
 DEFAULT_DATASETS = (
     Path("ml/data/processed/synthetic_test.jsonl"),
     Path("ml/data/real/real_test.jsonl"),
@@ -89,8 +104,91 @@ def predicted_quads(output: str) -> list[Any]:
     return parse_quads(output) or []
 
 
+def span_positions(text: str, span: str) -> list[tuple[int, int]]:
+    """Every (start, end) where `span` occurs verbatim in `text`."""
+    positions = []
+    start = text.find(span)
+    while start != -1:
+        positions.append((start, start + len(span)))
+        start = text.find(span, start + 1)
+    return positions
+
+
+def spans_overlap(text: str, a: str, b: str) -> bool:
+    """Do two spans cover the same stretch of the review?
+
+    Judged on positions, not shared characters, so 好正 early in a review can't match 好慢
+    later just because both contain 好. The overlap must also cover at least half of the shorter
+    span: a short span inside a longer one still matches (正 within 好正), but two longer spans
+    that merely touch at one character (湯得個咸字 / 字牛肉又韌) don't.
+    NULL (an implicit aspect or opinion) only matches NULL.
+    """
+    if a == b:
+        return True
+    if NULL in (a, b):
+        return False
+    needed = -(-min(len(a), len(b)) // 2)  # ceil(shorter / 2)
+    return any(
+        min(end_a, end_b) - max(start_a, start_b) >= needed
+        for start_a, end_a in span_positions(text, a)
+        for start_b, end_b in span_positions(text, b)
+    )
+
+
+def max_matching(
+    predicted: list[dict[str, str]],
+    gold: list[dict[str, str]],
+    matches: Callable[[dict[str, str], dict[str, str]], bool],
+) -> int:
+    """Size of the largest one-to-one pairing of predicted and gold quads.
+
+    Relaxed matching isn't a set intersection - one prediction can overlap two gold quads - so
+    each gold quad must be credited at most once. Kuhn's augmenting-path algorithm finds the
+    maximum pairing, which also makes the score independent of output order (greedy first-fit
+    can under-count depending on which prediction comes first).
+    """
+    owner: list[int | None] = [None] * len(gold)
+
+    def assign(i: int, visited: set[int]) -> bool:
+        for j, gold_quad in enumerate(gold):
+            if j in visited or not matches(predicted[i], gold_quad):
+                continue
+            visited.add(j)
+            if owner[j] is None or assign(owner[j], visited):
+                owner[j] = i
+                return True
+        return False
+
+    return sum(assign(i, set()) for i in range(len(predicted)))
+
+
+def relaxed_counts(
+    text: str, predicted: list[Any], gold: list[dict[str, str]], fields: tuple[str, ...]
+) -> tuple[int, int, int]:
+    """(tp, fp, fn) where span fields need only overlap and every other field must be equal."""
+    valid = [
+        quad
+        for quad in predicted
+        if isinstance(quad, dict) and all(isinstance(quad.get(f), str) for f in fields)
+    ]
+
+    def matches(pred: dict[str, str], gold_quad: dict[str, str]) -> bool:
+        return all(
+            (
+                spans_overlap(text, pred[f], gold_quad[f])
+                if f in SPAN_FIELDS
+                else pred[f] == gold_quad[f]
+            )
+            for f in fields
+        )
+
+    tp = max_matching(valid, gold, matches)
+    return tp, len(valid) - tp, len(gold) - tp
+
+
 def score(examples: list[dict[str, Any]], outputs: list[str]) -> dict[str, Any]:
     totals = {name: [0, 0, 0] for name in VIEWS}
+    relaxed_totals = {name: [0, 0, 0] for name in RELAXED_VIEWS}
     by_category: dict[str, list[int]] = defaultdict(lambda: [0, 0, 0])
     by_polarity: dict[str, list[int]] = defaultdict(lambda: [0, 0, 0])
 
@@ -101,6 +199,11 @@ def score(examples: list[dict[str, Any]], outputs: list[str]) -> dict[str, Any]:
                 quad_keys(predicted, fields), quad_keys(example["quads"], fields)
             )
             totals[name] = [a + b for a, b in zip(totals[name], counts)]
+        for name, fields in RELAXED_VIEWS.items():
+            counts = relaxed_counts(
+                example["text"], predicted, example["quads"], fields
+            )
+            relaxed_totals[name] = [a + b for a, b in zip(relaxed_totals[name], counts)]
 
         full_pred = quad_keys(predicted, FULL)
         full_gold = quad_keys(example["quads"], FULL)
@@ -122,7 +225,10 @@ def score(examples: list[dict[str, Any]], outputs: list[str]) -> dict[str, Any]:
     return {
         "reviews": len(examples),
         "gold_quads": sum(len(e["quads"]) for e in examples),
-        "views": {name: prf(*counts) for name, counts in totals.items()},
+        "views": {
+            **{name: prf(*counts) for name, counts in totals.items()},
+            **{name: prf(*counts) for name, counts in relaxed_totals.items()},
+        },
         "by_category": {label: prf(*c) for label, c in sorted(by_category.items())},
         "by_polarity": {label: prf(*c) for label, c in sorted(by_polarity.items())},
         "polarity_macro_f1": (
@@ -203,6 +309,10 @@ def print_report(name: str, result: dict[str, Any]) -> None:
     )
     print(f"  {'view':20s} {'P':>6s} {'R':>6s} {'F1':>6s}")
     for view, m in result["views"].items():
+        if view == next(iter(RELAXED_VIEWS)):
+            print(
+                "  -- relaxed: spans need only overlap (secondary; strict is the headline) --"
+            )
         print(f"  {view:20s} {m['precision']:6.3f} {m['recall']:6.3f} {m['f1']:6.3f}")
     print(
         "  full-quad F1 by category: "

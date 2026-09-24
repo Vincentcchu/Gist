@@ -219,6 +219,27 @@ out of reach locally. Kept for quick local experiments and local inference of 4-
   stricter. Partial views localize failures: term / term+category / term+polarity /
   category+polarity (what the dashboard aggregates) / full quad, plus per-category and
   per-polarity F1. Generations are cached, so re-scoring never needs the model.
+- [x] **Relaxed span-overlap views** (secondary — strict stays the headline). Reading the worst
+  cases showed many strict "misses" were span-*boundary* disagreements: `炒蛋 → 凍晒` against a
+  gold `炒蛋 → 已經凍晒` scored as a total miss. The `term (overlap)` and `full quad (overlap)`
+  views accept term/opinion spans covering the same stretch of the review (at least half the
+  shorter span, judged by position so a shared character elsewhere doesn't count), with category
+  and polarity still exact, and pair predictions with gold one-to-one via maximum bipartite
+  matching. A random sample of relaxed-only matches were all the same judgment with different
+  boundaries (`冇乜特別` vs `唔差 但冇乜特別`, `Our server` vs `server`).
+
+  | Synthetic test | 4B | 8B | 14B |
+  |---|---|---|---|
+  | Full quad, strict | 0.512 | 0.521 | 0.542 |
+  | Full quad, overlap | 0.732 | 0.737 | 0.755 |
+  | Term, strict | 0.652 | 0.646 | 0.667 |
+  | Term, overlap | 0.808 | 0.803 | 0.821 |
+
+  ~40% of strict misses are boundary disagreement, and the model ranking is unchanged — so the
+  relaxed view explains the strict number rather than flattering any model.
+- [x] `ml/eval/test_evaluate.py` — the project's first tests (15, all hand-computed): overlap by
+  position, NULL handling, the half-span threshold, one-to-one crediting (including a case where
+  greedy matching would under-count), and the strict scores unchanged.
 - [ ] Run on `synthetic_test` and `real_test` side by side — **the gap is the headline
   finding**, not the synthetic number.
 - [ ] `ml/eval/error_analysis.py` — pull the worst 15-20 examples, read them, categorize failure types (misses short reviews? struggles with code-switching? invents aspects not in the text?)
