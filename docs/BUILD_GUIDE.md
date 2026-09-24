@@ -263,7 +263,11 @@ out of reach locally. Kept for quick local experiments and local inference of 4-
 
 ## Phase 8 — Polish for portfolio (2-3 days)
 
-- [ ] `docs/model_card.md` — training data size/source, prompt/taxonomy approach, eval metrics, known failure modes, cost/latency comparison vs. teacher
+- [~] `docs/model_card.md` — written: data and normalization, models and hyperparameters, the
+  evaluation method (strict + overlap, bootstrap intervals), full synthetic results with per-category
+  / per-polarity / per-language breakdowns, error analysis, limitations, and training cost. Still to
+  add: §10 real-review results (after `real_test` is labeled) and serving cost/latency vs the teacher
+  (Phase 7).
 - [ ] README with the architecture diagram, setup instructions, and a "why these decisions" section (why distillation, why LoRA, why this base model)
 - [ ] Clean commit history / basic CI (lint + test on push) if you haven't already
 - [ ] Optional: a short write-up (blog post or README section) walking through the distillation results — this is genuinely good interview prep material, since you'll basically have pre-written your answer to "tell me about a project"

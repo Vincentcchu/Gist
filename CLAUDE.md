@@ -49,7 +49,8 @@ $19.26 total. Adapters and predictions live under `ml/outputs/<job>/` (gitignore
 originals in S3). Next: hand-label `ml/data/real/real_test.jsonl` (50 reviews,
 eval-only, never committed) and score every model on it with
 `evaluate.py --from-predictions` — that synthetic-vs-real gap decides whether 32B
-is worth running.
+is worth running. Full results, method and error analysis: `docs/model_card.md`
+(fill in its §10 when the real-test scores exist).
 
 **Scope:** synthetic data + SageMaker now → scraped real data + SageMaker later.
 Phases 3-4 (teacher-labeling real reviews) are deferred, not skipped — scraping
