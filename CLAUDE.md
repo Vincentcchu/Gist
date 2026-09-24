@@ -43,9 +43,13 @@ Cantonese-English code-switching). Portfolio project targeting applied ML Engine
   explicit/readable code over clever code
 
 ## Current phase
-Phase 5 — QLoRA sweep on the **synthetic set** via SageMaker. Span-verified ACOS
-quads in `ml/data/processed/`; a 50-review real test set (hand-labeled, eval-only)
-in `ml/data/real/`.
+Phase 5 done → Phase 6 (evaluation). The 4B/8B/14B QLoRA sweep on the **synthetic
+set** is complete on SageMaker: synthetic-test full-quad F1 0.512 / 0.521 / 0.542,
+$19.26 total. Adapters and predictions live under `ml/outputs/<job>/` (gitignored;
+originals in S3). Next: hand-label `ml/data/real/real_test.jsonl` (50 reviews,
+eval-only, never committed) and score every model on it with
+`evaluate.py --from-predictions` — that synthetic-vs-real gap decides whether 32B
+is worth running.
 
 **Scope:** synthetic data + SageMaker now → scraped real data + SageMaker later.
 Phases 3-4 (teacher-labeling real reviews) are deferred, not skipped — scraping

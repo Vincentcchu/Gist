@@ -155,22 +155,39 @@ Conservative by ~2-3 GB versus measured MLX peaks. 32B needs a 48 GB GPU even un
   a chat transcript.
 - [x] `--dry-run` validated a full job request against the account (image, role, channels,
   output path) without launching anything.
-- [ ] Smoke job: Qwen3-0.6B, 200 examples — container, requirements, bitsandbytes on real CUDA,
-  S3 channels, W&B, and the `model.tar.gz` → local `evaluate.py` round trip.
-- [ ] 14B smoke: 64 examples — confirms it fits and measures real it/s before any full run.
-- [ ] Sweep: 4B → 8B → 14B, 3 epochs each, identical hyperparameters. If the 4B's per-epoch
-  curve shows epoch 3 hurting, cut the others to 2.
-- [ ] Watch `eval_json_parse_rate` and `eval_span_verbatim_rate` in W&B, not just loss. A falling
-  loss with a flat verbatim rate means the model learned the JSON shape while inventing content.
+- [x] Smoke job: Qwen3-0.6B, 200 examples — container, requirements, bitsandbytes on real CUDA,
+  S3 channels, W&B, and the `model.tar.gz` → local `evaluate.py` round trip. First attempt died on
+  `NoRegionError` (the container sets no default AWS region; now passed in); second passed.
+- [x] 14B smoke: 64 examples — fits (20.1 GB of 23.7 GB at micro-batch 1), ~1.6 s per training
+  example. **Missed an eval-memory bug** because capping the data also capped the eval batch.
+- [x] Sweep: 4B (3 epochs) → 8B → 14B (2 epochs each, after the 4B's epoch 3 overfit). The 8B's
+  first run ran out of memory at its first end-of-epoch eval: `per_device_eval_batch_size` had
+  been left at the Trainer default of 8, ~4.4 GB of logits at Qwen's 151,936-token vocabulary.
+  Fixed by evaluating at the training micro-batch.
+- [x] `eval_json_parse_rate` and `eval_span_verbatim_rate` logged per epoch: 1.00 / ≥0.996
+  throughout for all three models — no hallucinated structure, and the one dip in verbatim rate
+  (4B, epoch 3) coincided with its overfitting.
 - [ ] Out of scope for now: spot instances (need checkpoint-resume; worth it only once runs get
   expensive), hyperparameter variants, 32B.
 
-**Checkpoint**: three adapters in S3 with per-epoch checkpoints, training curves in W&B, cached
-predictions for both test sets. Resume line: SageMaker training jobs end to end — IAM execution
-role, S3 channels, container selection, Secrets Manager, cost caps.
+**Results** (synthetic test, 251 reviews; each model's best epoch by val loss):
 
-**Cost**: estimated ~$25-40 for the whole sweep (from ~6 × params FLOPs/token at an effective
-15-30 TFLOPS). The 14B smoke job replaces this estimate with a measurement.
+| | 4B | 8B | 14B |
+|---|---|---|---|
+| Full-quad F1 | 0.512 | 0.521 | **0.542** |
+| Category + polarity F1 | 0.843 | 0.845 | **0.854** |
+| Best val loss | 0.0719 | 0.0717 | **0.0661** |
+| Cost | $4.77 | $4.63 | $6.98 |
+
+Size helps modestly on synthetic data (~+3 F1 points, 4B → 14B); the 14B was still improving at
+epoch 2. Whether the gap grows on real reviews — and so whether 32B is justified — waits on the
+hand-labeled `real_test`; every job already saved predictions for it.
+
+**Cost, measured:** $19.26 of training compute for the whole phase, including smoke tests ($0.83)
+and the failed 8B run ($2.05) — under the pre-sweep estimate of $25-40.
+
+**Checkpoint** ✅: three adapters in S3 with per-epoch checkpoints, training curves in W&B, cached
+predictions for both test sets.
 
 ### 5b — Local QLoRA via MLX (verified alternative)
 
