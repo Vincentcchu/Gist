@@ -1,5 +1,13 @@
 # Build Guide — Review ABSA MVP (Free-Text Aspects, Fine-Tuned Generative LLM)
 
+> **v2 label format (2026-10-04).** Labels are now term, description, polarity, opinion — no
+> category. The description is an open English phrase ("drink texture"); categories are applied
+> afterwards from editable maps. The synthetic set was regenerated in this format in the
+> generator repo (`ml/data/raw/README.md`), and labeling moved out of this repo: the generator
+> repo makes synthetic data, the annotator repo makes hand labels. Phase 3's teacher-labeling
+> pass below is superseded by that, and `ml/labeling/prompts.py` was retired. The gold spec is
+> `ml/data/real/README.md`. The v1 description of each phase is kept for the record.
+
 Each phase produces something visible/testable before you move on. Don't skip ahead — the point of this order is that you're never debugging two unfamiliar things at once.
 
 ---
@@ -62,7 +70,7 @@ Goal: something on screen, before any scraping or ML.
 Training data is currently 100% synthetic; the 312 scraped OpenRice reviews in the DB are still
 `status='pending'`.
 
-- [x] `ml/labeling/prompts.py` — ACOS extraction prompt, output identical to the fine-tuning
+- [x] ~~`ml/labeling/prompts.py`~~ (retired with v2; labeling lives in the annotator repo) — ACOS extraction prompt, output identical to the fine-tuning
   target in `ml/training/prompt_format.py`:
   ```json
   [{"term": "個waiter", "category": "Service", "polarity": "negative", "opinion": "成晚黑面"}]

@@ -1,8 +1,16 @@
-"""Normalize the raw synthetic dataset into span-verified ACOS quads.
+"""Turn a raw synthetic dataset into span-verified train/val/synthetic_test splits.
 
-ACOS = (Aspect, Category, Opinion, Sentiment). Reads
-`ml/data/raw/hk_restaurant_absa.jsonl` and writes train/val/synthetic_test splits to
-`ml/data/processed/`.
+Two label formats, detected from the records:
+
+- **v2** (current): term, description, polarity, opinion; no category.
+      python ml/training/prepare_dataset.py --input ml/data/raw/hk_restaurant_absa.v2.jsonl
+  writes `ml/data/processed_v2/`. Every v2 opinion is already an exact copy of one continuous
+  stretch of the review (the generator's schema.validate() enforced it), so quads are checked
+  and passed through unchanged. None of the v1 normalization below runs on them: splitting a v2
+  opinion would break a span the labels deliberately keep whole.
+
+- **v1** (kept so v1 results stay reproducible): ACOS = (Aspect, Category, Opinion,
+  Sentiment). Reads `ml/data/raw/hk_restaurant_absa.jsonl` and writes `ml/data/processed/`.
 
 The raw file's `opinion_words` is not a verbatim substring of the review in 18% of labels
 (4,289 / 23,908) - it frequently stitches fragments together across a clause boundary. This
@@ -48,7 +56,8 @@ POLARITIES = frozenset({"positive", "negative", "neutral"})
 NULL = "NULL"
 
 DEFAULT_INPUT = Path("ml/data/raw/hk_restaurant_absa.jsonl")
-DEFAULT_OUTDIR = Path("ml/data/processed")
+DEFAULT_OUTDIRS = {"v1": Path("ml/data/processed"), "v2": Path("ml/data/processed_v2")}
+V2_FIELDS = ("term", "description", "polarity", "opinion")
 
 
 class Quad(NamedTuple):
@@ -179,6 +188,78 @@ def normalize_review(record: dict[str, Any], stats: Counter) -> dict[str, Any] |
     }
 
 
+def label_format(records: list[dict[str, Any]]) -> str:
+    """'v2' if the raw labels carry a description, 'v1' if they carry a category."""
+    first = records[0]["aspects"][0]
+    return "v2" if "description" in first else "v1"
+
+
+def check_v2_quad(text: str, quad: dict[str, Any]) -> str | None:
+    """Why a v2 quad can't be trained on, or None. verify_dataset.py runs the full audit."""
+    if set(quad) != set(V2_FIELDS):
+        return f"keys {sorted(quad)}"
+    if quad["polarity"] not in POLARITIES:
+        return f"polarity {quad['polarity']!r}"
+    for field in ("term", "opinion"):
+        value = quad[field]
+        if value != NULL and value not in text:
+            return f"{field} not verbatim: {value!r}"
+    return None
+
+
+def prepare_v2_review(record: dict[str, Any]) -> dict[str, Any]:
+    """One v2 review, quads unchanged and in their original order.
+
+    Raises on an invalid quad instead of dropping it: every record passed the generator's
+    validator, so a failure here means something is wrong with the file, not with one label.
+    """
+    text = record["text"]
+    for quad in record["aspects"]:
+        problem = check_v2_quad(text, quad)
+        if problem:
+            raise ValueError(f"invalid v2 quad ({problem}) in review: {text[:60]!r}")
+
+    meta = record["meta"]
+    return {
+        "text": text,
+        "quads": [
+            {field: quad[field] for field in V2_FIELDS} for quad in record["aspects"]
+        ],
+        "overall_sentiment": record["overall_sentiment"],
+        "language_mode": meta["language_mode"],
+        "style": meta["style"],
+        "orthography": meta["orthography"],
+        "emoji_density": meta["emoji_density"],
+        "venue_type": meta["venue_type"],
+    }
+
+
+def report_v2(examples: list[dict[str, Any]]) -> None:
+    quads = [q for e in examples for q in e["quads"]]
+    per_review = sorted(len(e["quads"]) for e in examples)
+
+    print("\n=== v2 output (quads passed through unchanged) ===")
+    print(f"  reviews                     {len(examples):6d}")
+    print(f"  quads                       {len(quads):6d}")
+    print(
+        f"  quads/review                mean {len(quads)/len(examples):.1f}  "
+        f"median {per_review[len(per_review)//2]}  max {per_review[-1]}"
+    )
+    print(f"  NULL term                   {sum(q['term'] == NULL for q in quads):6d}")
+    print(
+        f"  NULL opinion                {sum(q['opinion'] == NULL for q in quads):6d}"
+    )
+
+    counts = Counter(q["polarity"] for q in quads)
+    print("\n  polarity:")
+    for value, count in counts.most_common():
+        print(f"    {value:14s} {count:6d}  {100*count/len(quads):5.1f}%")
+    descriptions = Counter(q["description"] for q in quads)
+    print(f"\n  descriptions: {len(descriptions)} distinct; most common:")
+    for value, count in descriptions.most_common(10):
+        print(f"    {value:22s} {count:6d}")
+
+
 def verify(examples: list[dict[str, Any]]) -> None:
     """Fail loudly if any span is not verbatim. This is the invariant, not a nicety."""
     violations = 0
@@ -262,7 +343,12 @@ def report(examples: list[dict[str, Any]], stats: Counter, raw_labels: int) -> N
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--input", type=Path, default=DEFAULT_INPUT)
-    parser.add_argument("--outdir", type=Path, default=DEFAULT_OUTDIR)
+    parser.add_argument(
+        "--outdir",
+        type=Path,
+        default=None,
+        help="default: ml/data/processed_v2 for v2 input, ml/data/processed for v1",
+    )
     parser.add_argument("--val-size", type=int, default=250)
     parser.add_argument("--test-size", type=int, default=250)
     parser.add_argument("--seed", type=int, default=13)
@@ -274,17 +360,24 @@ def main() -> None:
     args = parser.parse_args()
 
     records = read_jsonl(args.input)
-    raw_labels = sum(len(r["aspects"]) for r in records)
+    fmt = label_format(records)
+    outdir = args.outdir or DEFAULT_OUTDIRS[fmt]
+    print(f"{args.input}: {len(records)} reviews, {fmt} labels -> {outdir}/")
 
-    stats: Counter = Counter()
-    examples = [
-        example
-        for record in records
-        if (example := normalize_review(record, stats)) is not None
-    ]
-
-    verify(examples)
-    report(examples, stats, raw_labels)
+    if fmt == "v2":
+        examples = [prepare_v2_review(record) for record in records]
+        verify(examples)
+        report_v2(examples)
+    else:
+        raw_labels = sum(len(r["aspects"]) for r in records)
+        stats: Counter = Counter()
+        examples = [
+            example
+            for record in records
+            if (example := normalize_review(record, stats)) is not None
+        ]
+        verify(examples)
+        report(examples, stats, raw_labels)
 
     if args.dry_run:
         print("\n(dry run - nothing written)")
@@ -293,13 +386,13 @@ def main() -> None:
     train, val, test = stratified_split(
         examples, args.val_size, args.test_size, args.seed
     )
-    write_jsonl(args.outdir / "train.jsonl", train)
-    write_jsonl(args.outdir / "val.jsonl", val)
-    write_jsonl(args.outdir / "synthetic_test.jsonl", test)
+    write_jsonl(outdir / "train.jsonl", train)
+    write_jsonl(outdir / "val.jsonl", val)
+    write_jsonl(outdir / "synthetic_test.jsonl", test)
 
     print(
         f"\nwrote train={len(train)} val={len(val)} synthetic_test={len(test)} "
-        f"to {args.outdir}/"
+        f"to {outdir}/"
     )
 
 

@@ -345,14 +345,14 @@ def save_prompt_contract(output_dir: Path, tokenizer: Any) -> None:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", type=Path, default=CONFIG_PATH)
-    parser.add_argument("--data-dir", type=str, default="ml/data/processed")
+    parser.add_argument("--data-dir", type=str, default="ml/data/processed_v2")
     parser.add_argument("--output-dir", type=str, default="ml/outputs/run")
     parser.add_argument(
         "--eval-files",
         type=Path,
         nargs="*",
         default=[
-            Path("ml/data/processed/synthetic_test.jsonl"),
+            Path("ml/data/processed_v2/synthetic_test.jsonl"),
             Path("ml/data/real/real_test.jsonl"),
         ],
         help="test files to predict on after training (SageMaker uses the eval channel)",

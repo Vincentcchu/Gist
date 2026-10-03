@@ -7,9 +7,11 @@ Cantonese-English code-switching). Portfolio project targeting applied ML Engine
 - Backend: FastAPI, SQLAlchemy, DB via `DATABASE_URL` env var (SQLite locally by
   default, Postgres in prod on Railway/Render — same code, no branching needed)
 - Frontend: Next.js on Vercel
-- ML: teacher-labeled data (Claude API) -> LoRA fine-tune of **Qwen3-8B**
-  (PEFT) for **ACOS** quad extraction — aspect term, category, opinion span,
-  sentiment. Qwen over Llama for two task-specific reasons: its tokenizer
+- ML: synthetic labeled data (generated with Claude in a separate repo) -> LoRA
+  fine-tune of **Qwen3-8B** (PEFT) for quad extraction in the **v2 label format** —
+  term, description, polarity, opinion. There is no category: the description is
+  an open English phrase ("drink texture"), and categories are applied afterwards
+  from editable maps (description → group → level 1). Qwen over Llama for two task-specific reasons: its tokenizer
   encodes traditional Chinese at ~1-1.5 chars/token vs Llama-3.1's ~2-3 tokens
   per char (halves sequence length, and verbatim span copying is far more
   reliable over clean tokens), and Qwen3's pretraining covers 119
@@ -42,14 +44,24 @@ Cantonese-English code-switching). Portfolio project targeting applied ML Engine
 - Keep functions small and testable; this is a learning project, prefer
   explicit/readable code over clever code
 
+## Repo scope
+Gist does **no labeling**. The generator repo (`Synethic_review`) makes the synthetic
+data; the annotator repo (`llm-absa-annotator`) produces every hand label, including
+the gold. Gist exports and cleans scraped text, verifies data, trains, scores any
+predictions file against gold, and serves. Label conventions: `ml/data/real/README.md`.
+
 ## Current phase
-Phase 5 done → Phase 6 (evaluation). The 4B/8B/14B QLoRA sweep on the **synthetic
+**v2 data is in (2026-10-04).** The synthetic set was regenerated in the v2 format
+(5,000 reviews, 43,507 quads; provenance in `ml/data/raw/README.md`) and prepared into
+`ml/data/processed_v2/`. `real_test.jsonl` was re-cleaned and is ready for hand
+labeling. Retraining on v2 is on hold. The plan: train on synthetic and score on gold,
+then compare with training on hand-labeled real reviews from new venues (no venue in
+both training and gold).
+
+Before v2: Phase 5 done → Phase 6 (evaluation). The 4B/8B/14B QLoRA sweep on the **synthetic
 set** is complete on SageMaker: synthetic-test full-quad F1 0.512 / 0.521 / 0.542,
 $19.26 total. Adapters and predictions live under `ml/outputs/<job>/` (gitignored;
-originals in S3). Next: hand-label `ml/data/real/real_test.jsonl` (50 reviews,
-eval-only, never committed) and score every model on it with
-`evaluate.py --from-predictions` — that synthetic-vs-real gap decides whether 32B
-is worth running. Full results, method and error analysis: `docs/model_card.md`
+originals in S3). Those v1 models output the six old categories. Full results, method and error analysis: `docs/model_card.md`
 (fill in its §10 when the real-test scores exist).
 
 **Scope:** synthetic data + SageMaker now → scraped real data + SageMaker later.

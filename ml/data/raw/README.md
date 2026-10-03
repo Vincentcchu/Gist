@@ -1,6 +1,53 @@
 # Raw data provenance
 
-## `hk_restaurant_absa.jsonl`
+## `hk_restaurant_absa.v2.jsonl` (current)
+
+5,000 synthetic Hong Kong restaurant reviews with **43,507 quads** in the v2 label format: term,
+description, polarity, opinion. There is no category field; categories are applied afterwards
+from the description.
+
+- **Source:** the generator repo `Synethic_review`, file `hk_restaurant_absa.v2.jsonl` at commit
+  `a5cd94e` ("Align label conventions with standard ABSA practice").
+- **Written and labeled by** `claude-sonnet-5-5`.
+- **sha256** `1c7c532622e05d0f7f513b7b49517b3f66de2888f4a412c82094182ab8eea376`. The copy here is
+  byte-identical to the committed file.
+- **Not tracked in git**, like v1.
+- The generator's `*.pilot500` and `*.round2_150` files are earlier prompt versions and aren't
+  part of the dataset.
+
+**Reference for the label rules:** the generator's `schema.py`. It holds the 44 seed descriptions,
+the general descriptions, the keep-apart pairs and `validate()`, which every record passed. Its
+README section "Label format (v2)" gives the same rules in prose.
+
+Measured on this file:
+- quads per review: mean 8.7, range 1–14; 300 reviews sit at the cap of 14;
+- text: median 251 characters, max 600;
+- descriptions outside the 44 seeds: 0.8% of quads (80 strings);
+- NULL terms 26.7%, NULL opinions 0.2%; polarity 52 / 27 / 21% positive / negative / neutral;
+- typed rating lines (味道：🔅🔅🔅🔅): none.
+
+The v2 records differ from v1 in shape:
+
+```json
+{"text": "奶茶好滑，但下次都會再嚟",
+ "aspects": [
+   {"term": "奶茶", "description": "drink texture", "polarity": "positive", "opinion": "好滑"},
+   {"term": "NULL", "description": "revisit intent", "polarity": "positive", "opinion": "下次都會再嚟"}],
+ "overall_sentiment": "positive",
+ "meta": {"language_mode": "cantonese_colloquial", "style": "one_liner", "orthography": "clean",
+          "emoji_density": "none", "venue_type": "cha chaan teng"}}
+```
+
+Every opinion is already an exact copy of one continuous stretch of the text, so
+`prepare_dataset.py` validates the quads and passes them through unchanged. The v1 opinion
+splitting below doesn't apply:
+
+```bash
+python ml/training/prepare_dataset.py --input ml/data/raw/hk_restaurant_absa.v2.jsonl  # -> ml/data/processed_v2/
+python ml/training/verify_dataset.py --dir ml/data/processed_v2
+```
+
+## `hk_restaurant_absa.jsonl` (v1, kept so v1 results stay reproducible)
 
 5,000 synthetic Hong Kong restaurant reviews with ACOS labels, teacher-generated (Claude).
 

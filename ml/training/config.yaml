@@ -6,7 +6,11 @@
 # OPTIMIZER steps.
 
 model_id: Qwen/Qwen3-8B
-max_seq_len: 1024
+# 1280 for the v2 data (the v1 runs used 1024). Longest v2 example, prompt + target, is 1,080
+# tokens: 10 examples exceed 1024 and would be dropped, none exceed 1280. The synthetic
+# generator sizes its records against this value (Synethic_review/schema.py, GIST_MAX_SEQ_LEN),
+# so change both together. Memory at the new length is checked by a 14B smoke test first.
+max_seq_len: 1280
 seed: 13
 
 lora:
@@ -49,10 +53,11 @@ quantization:
 generation_eval:
   enabled: true
   num_samples: 16
-  max_new_tokens: 512
+  # v2 targets reach 527 tokens (p99 437); 512 would cut the longest ones mid-JSON.
+  max_new_tokens: 768
 
 # After training, train.py generates on every test file and writes predictions in the cache
-# format evaluate.py --from-predictions reads. Gold targets top out at 438 tokens; 768 leaves
+# format evaluate.py --from-predictions reads. v2 gold targets top out at 527 tokens; 768 leaves
 # room without letting a repetition loop run for thousands of tokens.
 prediction:
   batch_size: 8

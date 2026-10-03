@@ -55,12 +55,12 @@ PYTORCH_VERSION = "2.10.0"
 PY_VERSION = "py313"
 
 CHANNEL_FILES = {
-    "train": ["ml/data/processed/train.jsonl"],
-    "val": ["ml/data/processed/val.jsonl"],
+    "train": ["ml/data/processed_v2/train.jsonl"],
+    "val": ["ml/data/processed_v2/val.jsonl"],
     # Test sets go in their own channel. train.py only generates on them after training; the
     # train and val channels never contain them, so nothing in training can read test data.
     "eval": [
-        "ml/data/processed/synthetic_test.jsonl",
+        "ml/data/processed_v2/synthetic_test.jsonl",
         "ml/data/real/real_test.jsonl",
     ],
 }

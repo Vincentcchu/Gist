@@ -274,7 +274,7 @@ def save_adapter_config(
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", type=Path, default=CONFIG_PATH)
-    parser.add_argument("--data-dir", type=Path, default=Path("ml/data/processed"))
+    parser.add_argument("--data-dir", type=Path, default=Path("ml/data/processed_v2"))
     parser.add_argument("--output-dir", type=Path, default=Path("ml/outputs/mlx-run"))
     parser.add_argument("--model-path", type=str, default=None)
     parser.add_argument("--epochs", type=float, default=None)
