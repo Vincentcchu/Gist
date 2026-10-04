@@ -2,14 +2,15 @@
 
 ## `hk_restaurant_absa.v2.jsonl` (current)
 
-5,000 synthetic Hong Kong restaurant reviews with **43,507 quads** in the v2 label format: term,
+5,000 synthetic Hong Kong restaurant reviews with **43,932 quads** in the v2 label format: term,
 description, polarity, opinion. There is no category field; categories are applied afterwards
 from the description.
 
 - **Source:** the generator repo `Synethic_review`, file `hk_restaurant_absa.v2.jsonl` at commit
-  `a5cd94e` ("Align label conventions with standard ABSA practice").
+  `d291899` ("Apply the parts-of-a-dish term rule"). That commit changed labels only, not
+  texts: 618 quads in 565 reviews, net +425 versus `a5cd94e`.
 - **Written and labeled by** `claude-sonnet-5-5`.
-- **sha256** `1c7c532622e05d0f7f513b7b49517b3f66de2888f4a412c82094182ab8eea376`. The copy here is
+- **sha256** `e0c652769d386022f14808b717c86e600e646d7251dae47efb0ff9d8a4bd0bf6`. The copy here is
   byte-identical to the committed file.
 - **Not tracked in git**, like v1.
 - The generator's `*.pilot500` and `*.round2_150` files are earlier prompt versions and aren't
@@ -20,10 +21,10 @@ the general descriptions, the keep-apart pairs and `validate()`, which every rec
 README section "Label format (v2)" gives the same rules in prose.
 
 Measured on this file:
-- quads per review: mean 8.7, range 1–14; 300 reviews sit at the cap of 14;
+- quads per review: mean 8.8, range 1–14; 366 reviews sit at the cap of 14;
 - text: median 251 characters, max 600;
 - descriptions outside the 44 seeds: 0.8% of quads (80 strings);
-- NULL terms 26.7%, NULL opinions 0.2%; polarity 52 / 27 / 21% positive / negative / neutral;
+- NULL terms 26.4%, NULL opinions 0.2%; polarity 52 / 28 / 21% positive / negative / neutral;
 - typed rating lines (味道：🔅🔅🔅🔅): none.
 
 The v2 records differ from v1 in shape:

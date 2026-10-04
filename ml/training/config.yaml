@@ -7,7 +7,7 @@
 
 model_id: Qwen/Qwen3-8B
 # 1280 for the v2 data (the v1 runs used 1024). Longest v2 example, prompt + target, is 1,080
-# tokens: 10 examples exceed 1024 and would be dropped, none exceed 1280. The synthetic
+# tokens: 11 examples exceed 1024 and would be dropped, none exceed 1280. The synthetic
 # generator sizes its records against this value (Synethic_review/schema.py, GIST_MAX_SEQ_LEN),
 # so change both together. Memory at the new length is checked by a 14B smoke test first.
 max_seq_len: 1280

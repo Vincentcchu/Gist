@@ -92,6 +92,13 @@ real-test score.
   - a wait's term is what was waited for (`上菜`, `外賣`, `等位`), else `NULL`, never the duration.
 - `NULL` when the thing is never named (好抵食), and always for general verdicts.
 - Two things judged by one verdict stay one term (`叉燒同燒鵝`).
+- **Parts of a dish** (皮, 餡, 肉, 汁, 湯底…):
+  - A part named with its dish in the same clause keeps the dish as the term, and the part stays
+    in the opinion: 雲吞麵個湯底好鮮 → `雲吞麵` | `個湯底好鮮`.
+  - A part judged in its own clause is the term: …，啲火腿都唔係求其嗰啲 → `火腿`;
+    油雞髀都滑，雞皮薄薄地 → `油雞髀` | `都滑` + `雞皮` | `薄薄地`.
+  - A soup base that is itself the item ordered (麻辣湯底, 豚骨湯底) is simply the term.
+  - Clauses are separated by punctuation, line breaks or spaces.
 
 ### 3. Opinion: the words carrying the verdict
 - One continuous stretch, **copied exactly**, that doesn't contain the term. When the reviewer

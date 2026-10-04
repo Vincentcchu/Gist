@@ -52,7 +52,7 @@ predictions file against gold, and serves. Label conventions: `ml/data/real/READ
 
 ## Current phase
 **v2 data is in (2026-10-04).** The synthetic set was regenerated in the v2 format
-(5,000 reviews, 43,507 quads; provenance in `ml/data/raw/README.md`) and prepared into
+(5,000 reviews, 43,932 quads; provenance in `ml/data/raw/README.md`) and prepared into
 `ml/data/processed_v2/`. `real_test.jsonl` was re-cleaned and is ready for hand
 labeling. Retraining on v2 is on hold. The plan: train on synthetic and score on gold,
 then compare with training on hand-labeled real reviews from new venues (no venue in
