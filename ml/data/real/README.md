@@ -66,8 +66,8 @@ real-test score.
 
   | Area | Seeds |
   |---|---|
-  | Food | food overall, food taste, food texture, food temperature, food freshness, food doneness, food portion, food presentation, menu variety |
-  | Drinks | drink overall, drink taste, drink sweetness, drink texture, drink temperature |
+  | Food | food overall, food quality, food taste, food texture, food temperature, food freshness, food doneness, food portion, food presentation, menu variety |
+  | Drinks | drink overall, drink quality, drink taste, drink sweetness, drink texture, drink temperature |
   | Staff and service | service overall, staff attitude, staff attentiveness, serving speed, food wait time, order accuracy, dining time limit, payment methods |
   | Price | price level, value for money, service charge |
   | Getting in | queue time, table availability |
@@ -87,6 +87,13 @@ real-test score.
   - For the room and for cleanliness, the overall descriptions are ambience and restaurant
     cleanliness.
   - The whole visit is different: overall experience, revisit intent and recommendation (rule 4).
+- **food quality / drink quality** is the grade of the ingredients, or how well the item is made:
+  真材實料, 用料靚, 食物質素高, "quality ingredients" → food quality, positive. 漢堡扒係現成貨 →
+  `漢堡扒` | food quality | negative. 奶茶用靚茶葉 → `奶茶` | drink quality | positive. 咖啡係即溶嘅 →
+  `咖啡` | drink quality | negative.
+  - It isn't the general verdict: plain praise or criticism that names no quality (正, 一流, good,
+    必食) stays food overall or drink overall.
+  - Freshness stays food freshness; taste, texture and the rest are unchanged.
 - **Never interchangeable:**
   - queue time (waiting to get in) / food wait time (waiting for food after ordering) / serving
     speed (how quickly staff move and respond);
