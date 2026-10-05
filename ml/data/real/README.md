@@ -69,7 +69,7 @@ real-test score.
   | Food | food overall, food quality, food taste, food texture, food temperature, food freshness, food doneness, food portion, food presentation, menu variety |
   | Drinks | drink overall, drink quality, drink taste, drink sweetness, drink texture, drink temperature |
   | Staff and service | service overall, staff attitude, staff attentiveness, serving speed, food wait time, order accuracy, dining time limit, payment methods |
-  | Price | price level, value for money, service charge |
+  | Price | price value |
   | Getting in | queue time, table availability |
   | Room | seating space, seat comfort, noise level, decor, ambience, table sharing, crowding, room temperature, lighting |
   | Cleanliness | table cleanliness, tableware cleanliness, restroom cleanliness, food hygiene, restaurant cleanliness |
@@ -87,6 +87,10 @@ real-test score.
   - For the room and for cleanliness, the overall descriptions are ambience and restaurant
     cleanliness.
   - The whole visit is different: overall experience, revisit intent and recommendation (rule 4).
+- **price value** covers how expensive something is and whether it's worth it: 貴, 平, 抵食,
+  性價比高, 唔值, 價錢合理, "reasonable", "not worth it". Prices going up, a set that's good value
+  and a discount are all price value. What's charged for goes in the term (rule 2). How you can
+  pay (cash only, no cards) is payment methods, not price value.
 - **food quality / drink quality** is the grade of the ingredients, or how well the item is made:
   真材實料, 用料靚, 食物質素高, "quality ingredients" → food quality, positive. 漢堡扒係現成貨 →
   `漢堡扒` | food quality | negative. 奶茶用靚茶葉 → `奶茶` | drink quality | positive. 咖啡係即溶嘅 →
@@ -97,7 +101,6 @@ real-test score.
 - **Never interchangeable:**
   - queue time (waiting to get in) / food wait time (waiting for food after ordering) / serving
     speed (how quickly staff move and respond);
-  - value for money / price level / service charge (加一);
   - table sharing (搭枱) / crowding;
   - overall experience / revisit intent / recommendation.
 - "drink …" is for beverages. Soups take "food …" (Cantonese "drinks" soup, 飲湯).
@@ -106,8 +109,10 @@ real-test score.
 - The shortest phrase naming it, **copied exactly** (copy-paste, don't retype), with no verdict
   words and no leading classifier or determiner: `waiter`, not `個waiter`.
 - Never evidence about the thing:
-  - a price's term is the priced item if one is named (雙拼飯七十幾蚊 → `雙拼飯`), else `NULL`,
-    never the amount;
+  - a price's term is what's charged for, if named (雙拼飯七十幾蚊，算合理 → `雙拼飯` | price
+    value), else `NULL` (好抵食 → `NULL` | price value), never the amount. A fee is a term too:
+    仲要收加一 → `加一` | price value | negative, and the same for 茶位費, a charge for an add-on,
+    or a minimum spend;
   - a wait's term is what was waited for (`上菜`, `外賣`, `等位`), else `NULL`, never the duration.
 - `NULL` when the thing is never named (好抵食), and always for general verdicts.
 - Several things judged by one verdict are one label each, repeating the description, polarity
@@ -149,10 +154,10 @@ Restatements of one kind extend one label.
 
 ### 5. Good against bad: count the verdicts
 - Each half a complete verdict on a different quality → one label per quality:
-  偏鹹咗少少，不過夠滑 → food taste negative + food texture positive; 平但唔好食 → price level
+  偏鹹咗少少，不過夠滑 → food taste negative + food texture positive; 平但唔好食 → price value
   positive + food taste negative.
 - Halves weighing up one conclusion about one quality → one label, usually neutral:
-  貴，但一分錢一分貨 → value for money.
+  貴，但一分錢一分貨 → price value, neutral.
 - A drawback reframed as a plus (…不過好有街坊feel，我反而鍾意) → one verdict, labeled as the
   reviewer means it.
 
@@ -172,7 +177,7 @@ One label per rated item:
   | 速度 | serving speed |
   | 份量 | food portion |
   | 服務 | staff attitude |
-  | 抵食度 | value for money |
+  | 抵食度 | price value |
   | 環境 | ambience |
   | 整體評分 | overall experience |
 
