@@ -22,13 +22,13 @@ from typing import Any
 #
 # Kept terse on purpose (see the module docstring), and within the generator's token budget:
 # the synthetic records were sized for max_seq_len 1280 with <=200 tokens of system prompt plus
-# chat template (Synethic_review/schema.py, TOKEN_BUDGET). This one measures 151.
+# chat template (Synethic_review/schema.py, TOKEN_BUDGET). This one measures 158.
 SYSTEM_PROMPT = """Extract opinion quads from a Hong Kong restaurant review (Cantonese, English, or mixed). Output a JSON array of {"term","description","polarity","opinion"} objects.
 - term, opinion: exact substrings of the review, never translated or reworded. Use "NULL" when implied but not stated.
 - description: the quality judged, lowercase English, 1-4 words ("food taste", "queue time", "revisit intent").
 - polarity: positive, negative, or neutral.
 - One quad per judgment. General verdicts (overall experience, revisit intent, recommendation) take term "NULL".
-Output only the JSON array."""
+Output only the JSON array, [] if the review judges nothing."""
 
 QUAD_FIELDS = ("term", "description", "polarity", "opinion")
 

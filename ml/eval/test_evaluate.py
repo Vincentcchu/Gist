@@ -155,3 +155,22 @@ def test_unparseable_output_scores_zero():
     views = run(REVIEW, REVIEW_GOLD, '[{"term":"西多士","category":"Food"')
     assert views["full quad"]["f1"] == 0.0
     assert views["full quad (overlap)"]["f1"] == 0.0
+
+
+# --- reviews with no judgment (empty gold) ------------------------------------------------
+
+
+def test_prediction_on_a_review_with_no_judgment_is_a_false_positive():
+    views = run("叫咗西多士", [], [quad("西多士", "Food", "positive", "西多士")])
+    assert views["full quad"]["precision"] == 0.0
+    assert views["full quad"]["recall"] == 0.0
+
+
+def test_predicting_nothing_on_a_review_with_no_judgment_costs_nothing():
+    text = "西多士一流"
+    gold_quad = quad("西多士", "Food", "positive", "一流")
+    both = score(
+        [{"text": text, "quads": [gold_quad]}, {"text": "叫咗奶茶", "quads": []}],
+        [json.dumps([gold_quad]), "[]"],
+    )["views"]
+    assert both["full quad"]["f1"] == 1.0

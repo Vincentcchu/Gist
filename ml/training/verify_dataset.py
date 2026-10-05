@@ -5,7 +5,7 @@ normalizer cannot validate itself. Exits non-zero on any failure.
 
     python ml/training/verify_dataset.py --dir ml/data/processed_v2      # v2 splits
     python ml/training/verify_dataset.py                                  # v1 splits
-    python ml/training/verify_dataset.py --files ml/data/real/real_test.jsonl --allow-empty
+    python ml/training/verify_dataset.py --files ml/data/real/real_test.jsonl
 
 The label format is detected from the quads: v2 quads carry a `description`, v1 quads a
 `category`. The v2 rules match the generator's schema.validate() (Synethic_review, commit
@@ -31,6 +31,11 @@ GENERAL_DESCRIPTIONS = {"overall experience", "revisit intent", "recommendation"
 # apply to the synthetic splits only, never to --files (the hand-labeled gold).
 MAX_QUADS = 14
 MAX_TEXT_CHARS = 600
+
+# A v2 review with no quads is valid: it makes no judgment (only a list of dishes, or only the
+# place's reputation). The synthetic data has some on purpose, and gold exported from the
+# annotator holds only reviews a person confirmed, so there an empty list means "no judgment",
+# never "not labeled yet". v1 data had at least one quad per review, so empty still fails there.
 
 # --- v1: term, category, polarity, opinion ------------------------------------------------
 EXPECTED_CATEGORIES = {
@@ -141,7 +146,7 @@ def check_split(
         quads = example["quads"]
         where = f"{name}[{index}]"
 
-        if not quads and not allow_empty:
+        if not quads and not allow_empty and not v2:
             failures.append(f"{where}: empty quads")
 
         if v2:
@@ -182,9 +187,8 @@ def check_files(paths: list[Path], allow_empty: bool) -> None:
     for path in paths:
         examples = load(path)
         failures.extend(check_split(path.name, examples, allow_empty, synthetic=False))
-        if allow_empty:
-            done = sum(1 for e in examples if e["quads"])
-            print(f"  progress: {done}/{len(examples)} reviews labeled")
+        empty = sum(1 for e in examples if not e["quads"])
+        print(f"  reviews with no labels: {empty} (v2: 'no judgment')")
         if len({e["text"] for e in examples}) != len(examples):
             failures.append(f"{path.name}: duplicate review texts")
     report(failures, "PASS: all spans verbatim or NULL, schema valid")
@@ -217,8 +221,8 @@ def main() -> None:
     parser.add_argument(
         "--allow-empty",
         action="store_true",
-        help="with --files: don't fail on unlabeled reviews, so a half-finished labeling "
-        "session surfaces only real span errors",
+        help="v1 files only: don't fail on reviews with no quads (v2 always allows them, "
+        "because an empty list means the review makes no judgment)",
     )
     args = parser.parse_args()
 

@@ -189,8 +189,11 @@ def normalize_review(record: dict[str, Any], stats: Counter) -> dict[str, Any] |
 
 
 def label_format(records: list[dict[str, Any]]) -> str:
-    """'v2' if the raw labels carry a description, 'v1' if they carry a category."""
-    first = records[0]["aspects"][0]
+    """'v2' if the raw labels carry a description, 'v1' if they carry a category.
+
+    Looks at the first review that has labels: v2 reviews may have none (no judgment).
+    """
+    first = next(r["aspects"][0] for r in records if r["aspects"])
     return "v2" if "description" in first else "v1"
 
 

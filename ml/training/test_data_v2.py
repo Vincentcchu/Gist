@@ -218,3 +218,38 @@ def test_merge_drops_exact_duplicates_and_counts_unparseable_chunks():
     merged, unparsed = merge_quads(outputs)
     assert merged == [a, b]
     assert unparsed == 1
+
+
+# --- reviews with no judgment: an empty quads list is valid in v2 ---------------------------
+
+
+def test_empty_review_passes_in_v2():
+    from verify_dataset import check_split
+
+    examples = [good_example(), {"text": "叫咗西多士同奶茶", "quads": []}]
+    assert check_split("gold", examples, synthetic=False) == []
+    assert check_split("synthetic", examples, synthetic=True) == []
+
+
+def test_empty_review_still_fails_in_v1():
+    from verify_dataset import check_split
+
+    v1_quad = {
+        "term": "奶茶",
+        "category": "Food",
+        "polarity": "positive",
+        "opinion": "好滑",
+    }
+    examples = [{"text": TEXT, "quads": [v1_quad]}, {"text": "正", "quads": []}]
+    assert any("empty quads" in f for f in check_split("v1", examples))
+
+
+def test_format_detection_skips_reviews_with_no_labels():
+    from prepare_dataset import label_format
+
+    empty = dict(raw_record(), aspects=[])
+    assert label_format([empty, raw_record()]) == "v2"
+
+
+def test_no_judgment_target_is_an_empty_array():
+    assert build_target([]) == "[]"

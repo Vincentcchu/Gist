@@ -44,6 +44,10 @@ One review per line. `quads` holds the labels:
            {"term": "NULL", "description": "revisit intent", "polarity": "positive", "opinion": "下次都會再嚟"}]}
 ```
 
+**An empty `quads` list means the review makes no judgment** (only a list of dishes, or only the
+place's reputation). The annotator exports only reviews a person has confirmed, so an empty list
+never means "not labeled yet".
+
 Every label has exactly four fields, in this order: **term, description, polarity, opinion**. There
 is no category; categories are applied afterwards from the description. Implicit fields are the
 string `"NULL"`. Quad order doesn't matter, because scoring is set-based.
@@ -164,7 +168,8 @@ Restatements of one kind extend one label.
 ### 6. Polarity
 positive, negative or neutral. **Neutral** is a lukewarm or mixed verdict (一般, 中規中矩,
 唔平唔貴). A purely factual mention with no evaluation (what they ordered) is context and isn't
-labeled. Judge intent, not wording: sarcasm (真不愧為垃圾餐廳) is negative.
+labeled. Judge intent, not wording: sarcasm (真不愧為垃圾餐廳) is negative. A review with no
+judgment at all gets no labels: an empty `quads` list.
 
 ### 7. Typed rating lines (味道：🔅🔅🔅🔅)
 One label per rated item:
@@ -173,6 +178,9 @@ One label per rated item:
   | Label | Description |
   |---|---|
   | 味道 | food taste |
+  | 口感 | food texture |
+  | 新鮮 | food freshness |
+  | 賣相 | food presentation |
   | 衛生 | restaurant cleanliness |
   | 速度 | serving speed |
   | 份量 | food portion |
@@ -199,17 +207,14 @@ chunks at inference.)
 
 ## Checking the labels
 
-While labeling (unlabeled lines are allowed, and progress is reported):
-
-```bash
-python ml/training/verify_dataset.py --files ml/data/real/real_test.jsonl --allow-empty
-```
-
-When finished (every review must have at least one label):
+Run it on the annotator's export:
 
 ```bash
 python ml/training/verify_dataset.py --files ml/data/real/real_test.jsonl
 ```
+
+Reviews with no labels pass (they make no judgment), and the run reports how many there are. A
+surprisingly high count is worth a look in the annotator.
 
 The checks:
 - exact field names;
