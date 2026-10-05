@@ -103,7 +103,9 @@ real-test score.
     never the amount;
   - a wait's term is what was waited for (`上菜`, `外賣`, `等位`), else `NULL`, never the duration.
 - `NULL` when the thing is never named (好抵食), and always for general verdicts.
-- Two things judged by one verdict stay one term (`叉燒同燒鵝`).
+- Several things judged by one verdict are one label each, repeating the description, polarity
+  and opinion: 叉燒同燒鵝都好好食 → `叉燒` | `都好好食` + `燒鵝` | `都好好食`. A single dish whose
+  name contains 同 or "and" (mac and cheese, 薑蔥龍蝦) is one thing.
 - **A word that only points back to an item named elsewhere in the review** (飲料, 個包, "it", a
   shortened name) is not the term: use the item's name, copied from where the review names it.
   叫咗菠蘿包同凍檸茶，個包好鬆軟，杯嘢飲太甜 → `菠蘿包` | `好鬆軟` + `凍檸茶` | `太甜`.
