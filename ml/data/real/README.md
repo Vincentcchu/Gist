@@ -58,6 +58,7 @@ mechanical ones.
 Pre-labels would pull the gold toward the labeler that produced the training data and inflate the
 real-test score.
 
+<!-- guidelines:begin -->
 ### 1. Description: what quality is judged
 - Lowercase English, 1–4 words, letters only, shaped "<kind of thing> <quality>". Never the item
   itself: "drink texture", not "milk tea texture".
@@ -65,9 +66,9 @@ real-test score.
 
   | Area | Seeds |
   |---|---|
-  | Food | food taste, food texture, food temperature, food freshness, food doneness, food portion, food presentation, menu variety |
-  | Drinks | drink taste, drink sweetness, drink texture, drink temperature |
-  | Staff and service | staff attitude, staff attentiveness, serving speed, food wait time, order accuracy, dining time limit, payment methods |
+  | Food | food overall, food taste, food texture, food temperature, food freshness, food doneness, food portion, food presentation, menu variety |
+  | Drinks | drink overall, drink taste, drink sweetness, drink texture, drink temperature |
+  | Staff and service | service overall, staff attitude, staff attentiveness, serving speed, food wait time, order accuracy, dining time limit, payment methods |
   | Price | price level, value for money, service charge |
   | Getting in | queue time, table availability |
   | Room | seating space, seat comfort, noise level, decor, ambience, table sharing, crowding, room temperature, lighting |
@@ -75,6 +76,17 @@ real-test score.
   | General | overall experience, revisit intent, recommendation |
   | Other | location convenience, opening hours, parking |
 
+- **When a verdict names no particular quality**, use its area's "overall" description: food
+  overall, drink overall, service overall.
+  - 西多士一流 → `西多士` | food overall. 奶茶正 → `奶茶` | drink overall. 服務好 → `服務` |
+    service overall.
+  - A word that names a quality decides the description instead: 好食, 好味, delicious → food
+    taste.
+  - A general word next to a named quality is one label with the named quality: 一流，外脆內軟 →
+    food texture.
+  - For the room and for cleanliness, the overall descriptions are ambience and restaurant
+    cleanliness.
+  - The whole visit is different: overall experience, revisit intent and recommendation (rule 4).
 - **Never interchangeable:**
   - queue time (waiting to get in) / food wait time (waiting for food after ordering) / serving
     speed (how quickly staff move and respond);
@@ -114,6 +126,9 @@ Restatements of one kind extend one label.
 - 總括嚟講都OK，下次都會再嚟 → overall experience (總括嚟講都OK) + revisit intent (下次都會再嚟).
 - 正！下次再嚟 → overall experience (正) + revisit intent (下次再嚟).
 - 值得一試 / 推介大家 → recommendation.
+- **Recommending or warning against one dish is a verdict on that dish, not "recommendation"**:
+  西多士必食 → `西多士` | food overall | positive | `必食`. Overall experience, revisit intent and
+  recommendation are only for the whole visit, and always have term `NULL`.
 
 ### 5. Good against bad: count the verdicts
 - Each half a complete verdict on a different quality → one label per quality:
@@ -144,6 +159,7 @@ One label per rated item:
   | 環境 | ambience |
   | 整體評分 | overall experience |
 
+- This table is fixed. The "overall" rule from rule 1 doesn't apply here: 服務 stays staff attitude.
 - The opinion is the label and its score, copied exactly (`味道：🔅🔅🔅🔅`).
 - Polarity by score, out of 5: 1–2 negative, 3 neutral, 4–5 positive.
 - Commentary on the same line is labeled as ordinary labels.
@@ -157,6 +173,7 @@ A caption that carries a verdict (炒蛋真係有香又嫩又滑👍) is labeled
 Real reviews are labeled in full: no limit on the number of labels, and no length limit. (The
 synthetic data's 14-label, 600-character limits don't apply here; long reviews are split into
 chunks at inference.)
+<!-- guidelines:end -->
 
 ## Checking the labels
 
