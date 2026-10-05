@@ -104,6 +104,14 @@ real-test score.
   - a wait's term is what was waited for (`上菜`, `外賣`, `等位`), else `NULL`, never the duration.
 - `NULL` when the thing is never named (好抵食), and always for general verdicts.
 - Two things judged by one verdict stay one term (`叉燒同燒鵝`).
+- **A word that only points back to an item named elsewhere in the review** (飲料, 個包, "it", a
+  shortened name) is not the term: use the item's name, copied from where the review names it.
+  叫咗菠蘿包同凍檸茶，個包好鬆軟，杯嘢飲太甜 → `菠蘿包` | `好鬆軟` + `凍檸茶` | `太甜`.
+  - If it isn't clear which item is meant, keep the word the reviewer used.
+  - A word for the whole category stays the term: 食物一般 → `食物`.
+  - This is different from a part of a dish (below): a part is a different thing from its dish
+    and is still the term when judged in its own clause (`火腿`). A stand-in word is the same item
+    under a vaguer name.
 - **Parts of a dish** (皮, 餡, 肉, 汁, 湯底…):
   - A part named with its dish in the same clause keeps the dish as the term, and the part stays
     in the opinion: 雲吞麵個湯底好鮮 → `雲吞麵` | `個湯底好鮮`.
