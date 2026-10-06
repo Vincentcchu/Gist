@@ -1,0 +1,51 @@
+# The source of truth for descriptions: area -> seed -> refinement.
+#
+# - Seeds are the descriptions labelers pick from (README.md, rule 1). A new phrase is written
+#   only when no seed fits.
+# - A refinement is a more specific description under a parent. Its parent is a seed of the
+#   same area, or the area itself when no seed covers it. When descriptions are compared at seed
+#   level, a refinement counts as its parent seed (one whose parent is an area counts as itself).
+# - Areas are level 1 of the UI; seeds are level 2.
+#
+# The rule-1 table in README.md is generated from this file. After editing it, run:
+#   python ml/eval/descriptions.py --write-readme
+# A test fails if the README table and this file disagree.
+
+food:
+  seeds: [food overall, food quality, food taste, food texture, food temperature, food freshness, food doneness, food portion, food presentation, menu variety]
+  refinements:
+    food availability: {parent: menu variety, definition: items sold out or unavailable}
+
+drinks:
+  seeds: [drink overall, drink quality, drink taste, drink sweetness, drink texture, drink temperature, drink portion, drink presentation]
+
+service:
+  seeds: [service overall, staff attitude, staff attentiveness, serving speed, order accuracy, dining time limit, payment methods, ordering method]
+  refinements:
+    staff communication: {parent: service overall, definition: language ability and clarity}
+    free gift: {parent: service overall, definition: complimentary items}
+
+price:
+  seeds: [price value]
+
+getting in:
+  seeds: [queue time, queue management]
+  refinements:
+    queue seating: {parent: queue management, definition: seating for people waiting}
+
+room:
+  seeds: [seating space, seat comfort, noise level, decor, ambience, table sharing, crowding, room temperature, lighting]
+
+cleanliness:
+  seeds: [table cleanliness, tableware cleanliness, restroom cleanliness, food hygiene, restaurant cleanliness]
+
+general:
+  seeds: [overall experience, revisit intent, recommendation, popularity]
+
+location:
+  seeds: [location convenience]
+  refinements:
+    location ambience: {parent: location, definition: what the surroundings are like}
+
+practical:
+  seeds: [opening hours, parking]

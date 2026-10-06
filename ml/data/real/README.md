@@ -68,18 +68,36 @@ real-test score.
   itself: "drink texture", not "milk tea texture".
 - **Pick from the seed list.** Write a new phrase only when none fits, in the same shape:
 
+<!-- descriptions:begin -->
   | Area | Seeds |
   |---|---|
   | Food | food overall, food quality, food taste, food texture, food temperature, food freshness, food doneness, food portion, food presentation, menu variety |
-  | Drinks | drink overall, drink quality, drink taste, drink sweetness, drink texture, drink temperature |
-  | Staff and service | service overall, staff attitude, staff attentiveness, serving speed, order accuracy, dining time limit, payment methods |
+  | Drinks | drink overall, drink quality, drink taste, drink sweetness, drink texture, drink temperature, drink portion, drink presentation |
+  | Service | service overall, staff attitude, staff attentiveness, serving speed, order accuracy, dining time limit, payment methods, ordering method |
   | Price | price value |
-  | Getting in | queue time |
+  | Getting in | queue time, queue management |
   | Room | seating space, seat comfort, noise level, decor, ambience, table sharing, crowding, room temperature, lighting |
   | Cleanliness | table cleanliness, tableware cleanliness, restroom cleanliness, food hygiene, restaurant cleanliness |
-  | General | overall experience, revisit intent, recommendation |
-  | Other | location convenience, opening hours, parking, popularity |
+  | General | overall experience, revisit intent, recommendation, popularity |
+  | Location | location convenience |
+  | Practical | opening hours, parking |
 
+  **Refinements** are more specific than a seed. Use one when it fits exactly; when
+  descriptions are compared at seed level, it counts as its parent seed (one placed
+  directly under an area counts as itself).
+
+  | Refinement | Parent | Use for |
+  |---|---|---|
+  | food availability | menu variety | items sold out or unavailable |
+  | staff communication | service overall | language ability and clarity |
+  | free gift | service overall | complimentary items |
+  | queue seating | queue management | seating for people waiting |
+  | location ambience | location (the area) | what the surroundings are like |
+<!-- descriptions:end -->
+
+- **Retired descriptions** were merged into another one and aren't used any more: food wait time →
+  serving speed, table availability → queue time, price level / value for money / service charge →
+  price value. The verifier rejects them.
 - **When a verdict names no particular quality**, use its area's "overall" description: food
   overall, drink overall, service overall.
   - 西多士一流 → `西多士` | food overall. 奶茶正 → `奶茶` | drink overall. 服務好 → `服務` |
@@ -91,6 +109,11 @@ real-test score.
   - For the room and for cleanliness, the overall descriptions are ambience and restaurant
     cleanliness.
   - The whole visit is different: overall experience, revisit intent and recommendation (rule 4).
+- **Being left to do part of the job yourself** when the restaurant isn't self-service (adding the
+  seasoning packet to 沙爹牛肉麵, fetching your own water) is a lack of service: service overall,
+  negative, unless a specific service quality is named. Term `NULL` unless the staff are named,
+  with the dish kept in the opinion. The tell for food vs service: who would fix it, the kitchen or
+  the floor.
 - **price value** covers how expensive something is and whether it's worth it: 貴, 平, 抵食,
   性價比高, 唔值, 價錢合理, "reasonable", "not worth it". Prices going up, a set that's good value
   and a discount are all price value. What's charged for goes in the term (rule 2). How you can
@@ -219,6 +242,10 @@ gets labels.
   curious about the quinoa flakes"), and speech acts aimed at the restaurant: encouragement (keep it
   up, 加油, 繼續努力), thanks (多謝款待), congratulations. These get no label. Contrast 我會支持華星,
   a statement about the reviewer's own return → revisit intent.
+- **Pairings:** a remark whose only verdict is that two items go well together (絕配, 好夾, 超適合,
+  "pairs well with") isn't a verdict on either item and gets no label: the food can be bad while
+  the pairing is good. If the sentence also judges an item on its own (奶茶香滑，同西多士絕配), label
+  that part as usual.
 
 ### 7. Typed rating lines (味道：🔅🔅🔅🔅)
 One label per rated item:

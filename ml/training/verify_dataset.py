@@ -8,8 +8,8 @@ normalizer cannot validate itself. Exits non-zero on any failure.
     python ml/training/verify_dataset.py --files ml/data/real/real_test.jsonl
 
 The label format is detected from the quads: v2 quads carry a `description`, v1 quads a
-`category`. The v2 rules match the generator's schema.validate() (Synethic_review, commit
-0fb7864) rule for rule, so a record that passed generation passes here and vice versa. They are
+`category`. The v2 rules match the generator's schema.validate() (Synethic_review, including its
+RETIRED_DESCRIPTIONS check) rule for rule, so a record that passed generation passes here and vice versa. They are
 written out again here rather than imported, for the same reason as above.
 """
 
@@ -25,6 +25,16 @@ from typing import Any
 EXPECTED_V2_KEYS = {"term", "description", "polarity", "opinion"}
 # 1-4 lowercase words, letters only: "food taste", "revisit intent".
 DESCRIPTION_FORMAT = re.compile(r"[a-z]+( [a-z]+){0,3}")
+# Descriptions merged into another one. They still have the description format, so they're named
+# explicitly: a label using one was made under older conventions. Same list as the generator's
+# RETIRED_DESCRIPTIONS.
+RETIRED_DESCRIPTIONS = {
+    "food wait time": "serving speed",
+    "table availability": "queue time",
+    "price level": "price value",
+    "value for money": "price value",
+    "service charge": "price value",
+}
 # Verdicts about the whole experience. Their term is always NULL.
 GENERAL_DESCRIPTIONS = {"overall experience", "revisit intent", "recommendation"}
 # Limits the generator held synthetic records to. Real reviews are labeled in full, so these
@@ -100,6 +110,8 @@ def check_v2_quad(quad: Any, text: str) -> str | None:
         description
     ):
         return f"bad description format: {description!r}"
+    if description in RETIRED_DESCRIPTIONS:
+        return f"retired description: {description!r} is now {RETIRED_DESCRIPTIONS[description]!r}"
     if description in GENERAL_DESCRIPTIONS and term != NULL:
         return f"general verdict with a named term: {term!r}"
     return None

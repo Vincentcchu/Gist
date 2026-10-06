@@ -18,8 +18,9 @@ from the description.
   part of the dataset.
 
 **Reference for the label rules:** the generator's `schema.py`. At `0fb7864` it held 47 seed
-descriptions; the gold spec has since moved to 46 (table availability folded into queue time, food
-wait time into serving speed, popularity added), and the next regeneration follows it. It also holds
+descriptions; the gold spec has since moved to 50 (see `ml/data/real/description_hierarchy.yaml`), and
+table availability and food wait time are retired. This file uses them in 1,650 labels across
+1,425 reviews, so `verify_dataset.py` now rejects it: it's replaced at the next regeneration. It also holds
 the general descriptions, the keep-apart pairs and `validate()`, which every record passed. Its
 README section "Label format (v2)" gives the same rules in prose.
 

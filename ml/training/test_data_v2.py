@@ -280,3 +280,20 @@ def test_split_gives_val_and_test_their_share_of_empty_reviews():
     assert sum(not e["quads"] for e in val) == 2
     assert sum(not e["quads"] for e in test) == 2
     assert len(train) + len(val) + len(test) == 1000
+
+
+@pytest.mark.parametrize(
+    "retired, now",
+    [
+        ("food wait time", "serving speed"),
+        ("table availability", "queue time"),
+        ("price level", "price value"),
+        ("value for money", "price value"),
+        ("service charge", "price value"),
+    ],
+)
+def test_retired_descriptions_are_rejected_with_their_replacement(retired, now):
+    example = good_example()
+    example["quads"][0]["description"] = retired
+    problems = check_v2_example(example, synthetic=False)
+    assert any(f"is now {now!r}" in p for p in problems), problems

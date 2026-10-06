@@ -11,7 +11,7 @@ Cantonese-English code-switching). Portfolio project targeting applied ML Engine
   fine-tune of **Qwen3-8B** (PEFT) for quad extraction in the **v2 label format** —
   term, description, polarity, opinion. There is no category: the description is
   an open English phrase ("drink texture"), and categories are applied afterwards
-  from editable maps (description → group → level 1). Qwen over Llama for two task-specific reasons: its tokenizer
+  from `ml/data/real/description_hierarchy.yaml` (area → seed → refinement). Qwen over Llama for two task-specific reasons: its tokenizer
   encodes traditional Chinese at ~1-1.5 chars/token vs Llama-3.1's ~2-3 tokens
   per char (halves sequence length, and verbatim span copying is far more
   reliable over clean tokens), and Qwen3's pretraining covers 119
