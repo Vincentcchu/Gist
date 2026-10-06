@@ -17,7 +17,9 @@ from the description.
 - The generator's `*.pilot500` and `*.round2_150` files are earlier prompt versions and aren't
   part of the dataset.
 
-**Reference for the label rules:** the generator's `schema.py`. It holds the 47 seed descriptions,
+**Reference for the label rules:** the generator's `schema.py`. At `0fb7864` it held 47 seed
+descriptions; the gold spec has since moved to 46 (table availability folded into queue time, food
+wait time into serving speed, popularity added), and the next regeneration follows it. It also holds
 the general descriptions, the keep-apart pairs and `validate()`, which every record passed. Its
 README section "Label format (v2)" gives the same rules in prose.
 
@@ -27,7 +29,7 @@ Measured on this file:
   visit or the reputation), and their overall_sentiment is always neutral. `prepare_dataset.py`
   gives them their own stratum, so val and test get their share (8 each);
 - text: median 157 characters, max 596;
-- descriptions outside the 47 seeds: 0.3% of quads (34 strings);
+- descriptions outside that commit's 47 seeds: 0.3% of quads (34 strings);
 - NULL terms 33.2%, NULL opinions 0; polarity 52.6 / 28.9 / 18.4% positive / negative / neutral;
 - reviews with a typed rating line (味道：🔅🔅🔅🔅): 46;
 - longest training example: 1,050 Qwen3 tokens with the system prompt, under `max_seq_len` 1280.

@@ -72,13 +72,13 @@ real-test score.
   |---|---|
   | Food | food overall, food quality, food taste, food texture, food temperature, food freshness, food doneness, food portion, food presentation, menu variety |
   | Drinks | drink overall, drink quality, drink taste, drink sweetness, drink texture, drink temperature |
-  | Staff and service | service overall, staff attitude, staff attentiveness, serving speed, food wait time, order accuracy, dining time limit, payment methods |
+  | Staff and service | service overall, staff attitude, staff attentiveness, serving speed, order accuracy, dining time limit, payment methods |
   | Price | price value |
-  | Getting in | queue time, table availability |
+  | Getting in | queue time |
   | Room | seating space, seat comfort, noise level, decor, ambience, table sharing, crowding, room temperature, lighting |
   | Cleanliness | table cleanliness, tableware cleanliness, restroom cleanliness, food hygiene, restaurant cleanliness |
   | General | overall experience, revisit intent, recommendation |
-  | Other | location convenience, opening hours, parking |
+  | Other | location convenience, opening hours, parking, popularity |
 
 - **When a verdict names no particular quality**, use its area's "overall" description: food
   overall, drink overall, service overall.
@@ -95,6 +95,17 @@ real-test score.
   性價比高, 唔值, 價錢合理, "reasonable", "not worth it". Prices going up, a set that's good value
   and a discount are all price value. What's charged for goes in the term (rule 2). How you can
   pay (cash only, no cards) is payment methods, not price value.
+- **queue time** covers whether and how long you waited to be seated, including no wait (仲有位唔使等,
+  一到就有枱, "seated right away"). A lost or refused booking is queue time, negative. Remarks about
+  capacity (座位得十幾個) go to seating space or crowding.
+- **serving speed** is how quickly you're served once seated: order taken, food or takeaway arriving
+  (上菜, 外賣), refills, the bill, staff responding, and any bare "fast/slow service".
+  **staff attentiveness** is whether staff notice and anticipate (offering the English menu,
+  問要不要加熱水, 上菜後就唔見人), not how fast they respond.
+- **popularity** is a full house or a loyal following, stated as praise of the restaurant: 客常滿,
+  好多熟客, "very loyal customer base", "always packed with locals". Term `NULL` unless the
+  restaurant is named; positive unless framed otherwise. When the crowd costs the reviewer
+  something, it's queue time or crowding instead.
 - **food quality / drink quality** is the grade of the ingredients, or how well the item is made:
   真材實料, 用料靚, 食物質素高, "quality ingredients" → food quality, positive. 漢堡扒係現成貨 →
   `漢堡扒` | food quality | negative. 奶茶用靚茶葉 → `奶茶` | drink quality | positive. 咖啡係即溶嘅 →
@@ -103,8 +114,8 @@ real-test score.
     必食) stays food overall or drink overall.
   - Freshness stays food freshness; taste, texture and the rest are unchanged.
 - **Never interchangeable:**
-  - queue time (waiting to get in) / food wait time (waiting for food after ordering) / serving
-    speed (how quickly staff move and respond);
+  - queue time (getting in) / serving speed (everything after you're seated) / staff attentiveness
+    (noticing, not timing);
   - table sharing (搭枱) / crowding;
   - overall experience / revisit intent / recommendation.
 - "drink …" is for beverages. Soups take "food …" (Cantonese "drinks" soup, 飲湯).
@@ -119,6 +130,11 @@ real-test score.
     or a minimum spend;
   - a wait's term is what was waited for (`上菜`, `外賣`, `等位`), else `NULL`, never the duration.
 - `NULL` when the thing is never named (好抵食), and always for general verdicts.
+- **The venue word is a term like any other** when a non-general verdict names it: `cafe` |
+  ambience | "Classic hole in the wall"; `餐廳` | ambience | 到底的港式; `restaurant` | crowding |
+  "is always crowded". Generic nouns are terms too (food, items, local cuisine). `NULL` only when
+  nothing names the thing, or for the three general verdicts, which take `NULL` even when the place
+  is named ("amongst my favourite 茶餐廳 in hk" → `NULL` | overall experience).
 - Several things judged by one verdict are one label each, repeating the description, polarity
   and opinion: 叉燒同燒鵝都好好食 → `叉燒` | `都好好食` + `燒鵝` | `都好好食`. A single dish whose
   name contains 同 or "and" (mac and cheese, 薑蔥龍蝦) is one thing.
@@ -136,6 +152,11 @@ real-test score.
   - A part judged in its own clause is the term: …，啲火腿都唔係求其嗰啲 → `火腿`;
     油雞髀都滑，雞皮薄薄地 → `油雞髀` | `都滑` + `雞皮` | `薄薄地`.
   - A soup base that is itself the item ordered (麻辣湯底, 豚骨湯底) is simply the term.
+  - **A dish name used as a heading** before a dash or colon is the term, and the remark is the
+    opinion even if it names a part: "Ham & egg pineapple bun - egg was gooey and perfectly
+    cooked" → `Ham & egg pineapple bun` | food doneness | `egg was gooey and perfectly cooked`. A
+    part becomes the term only when it's judged in a clause of its own after the dish has been
+    introduced (沾埋佢既煉奶，又唔似傳統西多蜜糖咁濃 → `煉奶`).
   - Clauses are separated by punctuation, line breaks or spaces.
 
 ### 3. Opinion: the words carrying the verdict
@@ -152,6 +173,11 @@ Restatements of one kind extend one label.
 - 總括嚟講都OK，下次都會再嚟 → overall experience (總括嚟講都OK) + revisit intent (下次都會再嚟).
 - 正！下次再嚟 → overall experience (正) + revisit intent (下次再嚟).
 - 值得一試 / 推介大家 → recommendation.
+- **The addressee tells them apart.** Addressed to other diners ("Must try", 推介大家, "don't
+  listen to the bad reviews", 值得專程跑一趟) → recommendation. About the reviewer's own return
+  (下次再嚟, "a staple on every HK journey") → revisit intent. Summing up the visit ("my favourite
+  茶餐廳", "Very Hong Kong-style dining experience", "No fuss. Gets the job done.") → overall
+  experience. Recommending a dish stays food/drink overall on the dish (next point).
 - **Recommending or warning against one dish is a verdict on that dish, not "recommendation"**:
   西多士必食 → `西多士` | food overall | positive | `必食`. Overall experience, revisit intent and
   recommendation are only for the whole visit, and always have term `NULL`.
@@ -160,18 +186,39 @@ Restatements of one kind extend one label.
 - Each half a complete verdict on a different quality → one label per quality:
   偏鹹咗少少，不過夠滑 → food taste negative + food texture positive; 平但唔好食 → price value
   positive + food taste negative.
-- Halves weighing up one conclusion about one quality → one label, usually neutral:
-  貴，但一分錢一分貨 → price value, neutral.
+- Halves weighing up one conclusion about one quality → one label with the concluded polarity,
+  usually neutral: 貴，但一分錢一分貨 → price value, neutral, because price value covers both
+  level and worth.
 - A drawback reframed as a plus (…不過好有街坊feel，我反而鍾意) → one verdict, labeled as the
-  reviewer means it.
+  reviewer means it: 坐得迫，不過好有街坊feel，我反而鍾意 → one seating space label, positive.
+- **Polarity belongs to the aspect, not to the review's conclusion.** A trade-off between two
+  aspects is two labels, each with its own polarity: "worth the long queue" → queue time negative +
+  overall experience positive; "delicious food at a good price, enough to justify the significant
+  wait times" → queue time negative, with the praise in the food and price labels.
 
 ### 6. Polarity
 positive, negative or neutral. **Neutral** is a lukewarm or mixed verdict (一般, 中規中矩,
-唔平唔貴). A purely factual mention with no evaluation (what they ordered) is context and isn't
+唔平唔貴, 都ok, "pretty average"). A purely factual mention with no evaluation (what they ordered) is context and isn't
 labeled. Judge intent, not wording: sarcasm (真不愧為垃圾餐廳) is negative. A review with no
 judgment at all gets no labels: an empty `quads` list. That's only when it really contains no
 verdict: a list of dishes, a note on the visit or the reputation. One verdict anywhere means it
 gets labels.
+
+- **Verdict or description?** A sentence that answers "how was it?" is a verdict and gets a label.
+  A sentence that only says what something is gets no label: 牛肉就是罐頭牛肉,
+  奶茶一定是港式特有的茶味重, "a modernised breakfast menu", "set comes with garlic bun and drink",
+  "this is a mom and pop shop". Tie-breaker: if neither "I liked that" nor "I didn't like that" nor
+  "fine, nothing special" fits in front of it, it's descriptive. Connotation alone (modernised,
+  renovated, new) isn't a verdict unless the rest of the review confirms the stance.
+- **Exception: venue operations.** For table sharing, payment methods, dining time limit, opening
+  hours and parking, the fact is the feedback, so it's labeled even when nothing is judged.
+  Polarity follows the framing: a limitation ("only accept cash", 只收現金) is negative; a plain
+  statement ("Expected to share table"; 從早餐到晚餐都有 → positive as a listed merit, neutral as a
+  flat statement) takes the stance shown, or neutral; something enjoyed is positive.
+- **Also not verdicts:** the reviewer's memories ("Reminds me of times as kids"), curiosity ("I'm
+  curious about the quinoa flakes"), and speech acts aimed at the restaurant: encouragement (keep it
+  up, 加油, 繼續努力), thanks (多謝款待), congratulations. These get no label. Contrast 我會支持華星,
+  a statement about the reviewer's own return → revisit intent.
 
 ### 7. Typed rating lines (味道：🔅🔅🔅🔅)
 One label per rated item:
