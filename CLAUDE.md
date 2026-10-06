@@ -51,10 +51,10 @@ the gold. Gist exports and cleans scraped text, verifies data, trains, scores an
 predictions file against gold, and serves. Label conventions: `ml/data/real/README.md`.
 
 ## Current phase
-**v2 data is in (2026-10-04).** The synthetic set was regenerated in the v2 format
-(5,000 reviews, 43,932 quads; provenance in `ml/data/raw/README.md`) and prepared into
+**v2 data is in (regenerated 2026-10-06, generator 0fb7864).** The synthetic set was regenerated in the v2 format
+(5,000 reviews, 30,645 quads, 151 with no judgment; provenance in `ml/data/raw/README.md`) and prepared into
 `ml/data/processed_v2/`. `real_test.jsonl` was re-cleaned and is ready for hand
-labeling. Retraining on v2 is on hold. The plan: train on synthetic and score on gold,
+labeling. Retraining on v2 started 2026-10-06 (14B memory smoke test, then 4B and 14B). The plan: train on synthetic and score on gold,
 then compare with training on hand-labeled real reviews from new venues (no venue in
 both training and gold).
 

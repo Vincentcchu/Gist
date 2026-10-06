@@ -253,3 +253,30 @@ def test_format_detection_skips_reviews_with_no_labels():
 
 def test_no_judgment_target_is_an_empty_array():
     assert build_target([]) == "[]"
+
+
+def test_prepare_keeps_a_review_with_no_quads():
+    record = dict(raw_record(), aspects=[], overall_sentiment="neutral")
+    example = prepare_v2_review(record)
+    assert example["quads"] == []
+    assert build_target(example["quads"]) == "[]"
+
+
+def test_split_gives_val_and_test_their_share_of_empty_reviews():
+    from prepare_dataset import stratified_split
+
+    # 1,000 reviews, 30 of them empty (3%). As their own stratum, val and test each get
+    # round(30 x 50 / 1,000) = round(1.5) = 2 of them.
+    examples = [
+        {
+            "text": f"review {i}",
+            "quads": [] if i % 100 < 3 else [{"term": "NULL"}],
+            "language_mode": f"lang{i % 10}",
+            "style": "standard",
+        }
+        for i in range(1000)
+    ]
+    train, val, test = stratified_split(examples, 50, 50, seed=13, separate_empty=True)
+    assert sum(not e["quads"] for e in val) == 2
+    assert sum(not e["quads"] for e in test) == 2
+    assert len(train) + len(val) + len(test) == 1000

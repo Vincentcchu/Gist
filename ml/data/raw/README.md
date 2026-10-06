@@ -2,30 +2,35 @@
 
 ## `hk_restaurant_absa.v2.jsonl` (current)
 
-5,000 synthetic Hong Kong restaurant reviews with **43,932 quads** in the v2 label format: term,
+5,000 synthetic Hong Kong restaurant reviews with **30,645 quads** in the v2 label format: term,
 description, polarity, opinion. There is no category field; categories are applied afterwards
 from the description.
 
 - **Source:** the generator repo `Synethic_review`, file `hk_restaurant_absa.v2.jsonl` at commit
-  `d291899` ("Apply the parts-of-a-dish term rule"). That commit changed labels only, not
-  texts: 618 quads in 565 reviews, net +425 versus `a5cd94e`.
+  `0fb7864`. It was regenerated from scratch under the gold conventions as of 2026-10-06 (overall
+  descriptions, food/drink quality, price value, the stand-in and one-item-per-label term rules,
+  rating lines, reviews with no judgment). It replaces the `d291899` set.
 - **Written and labeled by** `claude-sonnet-5-5`.
-- **sha256** `e0c652769d386022f14808b717c86e600e646d7251dae47efb0ff9d8a4bd0bf6`. The copy here is
+- **sha256** `3aefd499090c3e7994386e62c4f896b010fee7ddac37f79c871a9c75c4276029`. The copy here is
   byte-identical to the committed file.
 - **Not tracked in git**, like v1.
 - The generator's `*.pilot500` and `*.round2_150` files are earlier prompt versions and aren't
   part of the dataset.
 
-**Reference for the label rules:** the generator's `schema.py`. It holds the 44 seed descriptions,
+**Reference for the label rules:** the generator's `schema.py`. It holds the 47 seed descriptions,
 the general descriptions, the keep-apart pairs and `validate()`, which every record passed. Its
 README section "Label format (v2)" gives the same rules in prose.
 
 Measured on this file:
-- quads per review: mean 8.8, range 1–14; 366 reviews sit at the cap of 14;
-- text: median 251 characters, max 600;
-- descriptions outside the 44 seeds: 0.8% of quads (80 strings);
-- NULL terms 26.4%, NULL opinions 0.2%; polarity 52 / 28 / 21% positive / negative / neutral;
-- typed rating lines (味道：🔅🔅🔅🔅): none.
+- quads per review: mean 6.1, range 0–14; 140 reviews sit at the cap of 14;
+- **151 reviews (3.0%) have no quads**: they make no judgment (a list of dishes, a note on the
+  visit or the reputation), and their overall_sentiment is always neutral. `prepare_dataset.py`
+  gives them their own stratum, so val and test get their share (8 each);
+- text: median 157 characters, max 596;
+- descriptions outside the 47 seeds: 0.3% of quads (34 strings);
+- NULL terms 33.2%, NULL opinions 0; polarity 52.6 / 28.9 / 18.4% positive / negative / neutral;
+- reviews with a typed rating line (味道：🔅🔅🔅🔅): 46;
+- longest training example: 1,050 Qwen3 tokens with the system prompt, under `max_seq_len` 1280.
 
 The v2 records differ from v1 in shape:
 

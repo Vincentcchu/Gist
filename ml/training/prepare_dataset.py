@@ -252,6 +252,8 @@ def report_v2(examples: list[dict[str, Any]]) -> None:
     print(
         f"  NULL opinion                {sum(q['opinion'] == NULL for q in quads):6d}"
     )
+    empty = sum(1 for e in examples if not e["quads"])
+    print(f"  reviews with no quads       {empty:6d}  ({100*empty/len(examples):.1f}%)")
 
     counts = Counter(q["polarity"] for q in quads)
     print("\n  polarity:")
@@ -277,13 +279,29 @@ def verify(examples: list[dict[str, Any]]) -> None:
         raise AssertionError(f"{violations} non-verbatim spans survived normalization")
 
 
+def stratum(example: dict[str, Any], separate_empty: bool) -> tuple:
+    """The group a review is split within: its (language_mode, style).
+
+    With separate_empty (v2), reviews with no quads form one group of their own instead. There
+    are few of them (3% of v2), so spread across the language/style groups each group would hold
+    ~7 and round to zero val/test reviews; as one group, val and test each get their share.
+    """
+    if separate_empty and not example["quads"]:
+        return ("no judgment",)
+    return (example["language_mode"], example["style"])
+
+
 def stratified_split(
-    examples: list[dict[str, Any]], val_size: int, test_size: int, seed: int
+    examples: list[dict[str, Any]],
+    val_size: int,
+    test_size: int,
+    seed: int,
+    separate_empty: bool = False,
 ) -> tuple[list, list, list]:
-    """Split by (language_mode, style) so val and test mirror the training distribution."""
+    """Split by stratum so val and test mirror the training distribution."""
     groups: dict[tuple, list] = defaultdict(list)
     for example in examples:
-        groups[(example["language_mode"], example["style"])].append(example)
+        groups[stratum(example, separate_empty)].append(example)
 
     rng = random.Random(seed)
     total = len(examples)
@@ -387,7 +405,11 @@ def main() -> None:
         return
 
     train, val, test = stratified_split(
-        examples, args.val_size, args.test_size, args.seed
+        examples,
+        args.val_size,
+        args.test_size,
+        args.seed,
+        separate_empty=fmt == "v2",
     )
     write_jsonl(outdir / "train.jsonl", train)
     write_jsonl(outdir / "val.jsonl", val)

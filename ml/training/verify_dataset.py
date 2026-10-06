@@ -9,7 +9,7 @@ normalizer cannot validate itself. Exits non-zero on any failure.
 
 The label format is detected from the quads: v2 quads carry a `description`, v1 quads a
 `category`. The v2 rules match the generator's schema.validate() (Synethic_review, commit
-a5cd94e) rule for rule, so a record that passed generation passes here and vice versa. They are
+0fb7864) rule for rule, so a record that passed generation passes here and vice versa. They are
 written out again here rather than imported, for the same reason as above.
 """
 

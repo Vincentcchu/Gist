@@ -97,6 +97,7 @@ def hyperparameters(args: argparse.Namespace) -> dict[str, object]:
         "epochs": args.epochs,
         "learning-rate": args.learning_rate,
         "max-examples": args.max_examples,
+        "longest-first": "true" if args.longest_first else None,
     }
     values.update({key: value for key, value in optional.items() if value is not None})
     return values
@@ -146,6 +147,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--epochs", type=float, default=None)
     parser.add_argument("--learning-rate", type=float, default=None)
     parser.add_argument("--max-examples", type=int, default=None)
+    parser.add_argument(
+        "--longest-first",
+        action="store_true",
+        help="with --max-examples: train on the longest examples (memory smoke test)",
+    )
     parser.add_argument(
         "--max-hours",
         type=float,

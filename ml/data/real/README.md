@@ -169,7 +169,9 @@ Restatements of one kind extend one label.
 positive, negative or neutral. **Neutral** is a lukewarm or mixed verdict (一般, 中規中矩,
 唔平唔貴). A purely factual mention with no evaluation (what they ordered) is context and isn't
 labeled. Judge intent, not wording: sarcasm (真不愧為垃圾餐廳) is negative. A review with no
-judgment at all gets no labels: an empty `quads` list.
+judgment at all gets no labels: an empty `quads` list. That's only when it really contains no
+verdict: a list of dishes, a note on the visit or the reputation. One verdict anywhere means it
+gets labels.
 
 ### 7. Typed rating lines (味道：🔅🔅🔅🔅)
 One label per rated item:

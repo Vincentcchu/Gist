@@ -52,8 +52,10 @@ from transformers import (
 from prompt_format import (
     encode_example,
     generation_metrics,
+    merge_quads,
     prompt_contract,
     render_prompt,
+    split_for_inference,
 )
 
 CONFIG_PATH = Path(__file__).parent / "config.yaml"
@@ -269,19 +271,71 @@ def write_predictions(
     eval_dir.mkdir(parents=True, exist_ok=True)
     for path in eval_files:
         texts = [example["text"] for example in read_jsonl(path)][:limit]
-        outputs: list[str] = []
-        for start in range(0, len(texts), batch_size):
-            outputs.extend(
+        # Reviews longer than the training limit are cut into chunks (split_for_inference),
+        # generated chunk by chunk, and merged back into one prediction per review.
+        chunked = [split_for_inference(text) for text in texts]
+        flat = [chunk for chunks in chunked for chunk in chunks]
+        chunk_outputs: list[str] = []
+        for start in range(0, len(flat), batch_size):
+            chunk_outputs.extend(
                 generate_batch(
-                    model, tokenizer, texts[start : start + batch_size], max_new_tokens
+                    model, tokenizer, flat[start : start + batch_size], max_new_tokens
                 )
             )
-            print(f"  predictions {path.stem}: {len(outputs)}/{len(texts)}", flush=True)
+            print(
+                f"  predictions {path.stem}: {len(chunk_outputs)}/{len(flat)} chunks",
+                flush=True,
+            )
+        records = assemble_predictions(chunked, chunk_outputs)
         with (eval_dir / f"{path.stem}.predictions.jsonl").open(
             "w", encoding="utf-8"
         ) as handle:
-            for output in outputs:
-                handle.write(json.dumps({"output": output}, ensure_ascii=False) + "\n")
+            for record in records:
+                handle.write(json.dumps(record, ensure_ascii=False) + "\n")
+
+
+def assemble_predictions(
+    chunked: list[list[str]], chunk_outputs: list[str]
+) -> list[dict[str, Any]]:
+    """One prediction record per review from the outputs of its chunks, in order.
+
+    A one-chunk review keeps the model's raw output, exactly as before chunking existed, so a
+    malformed answer still shows up as unparseable. A multi-chunk review gets its chunks' quads
+    merged (duplicates dropped) and records how many chunks it had and how many didn't parse.
+    """
+    records: list[dict[str, Any]] = []
+    position = 0
+    for chunks in chunked:
+        outputs = chunk_outputs[position : position + len(chunks)]
+        position += len(chunks)
+        if len(chunks) == 1:
+            records.append({"output": outputs[0]})
+            continue
+        merged, unparsed = merge_quads(outputs)
+        records.append(
+            {
+                "output": json.dumps(merged, ensure_ascii=False),
+                "chunks": len(chunks),
+                "unparsed_chunks": unparsed,
+            }
+        )
+    return records
+
+
+def longest_first(
+    examples: list[dict[str, Any]], tokenizer: Any, max_seq_len: int
+) -> list[dict[str, Any]]:
+    """Examples sorted by token length, longest first, among those that fit max_seq_len.
+
+    For the memory smoke test: peak GPU memory is set by the longest sequences, so a smoke test
+    on the first N examples can miss the worst case (v1's did).
+    """
+
+    def length(example: dict[str, Any]) -> int:
+        encoded = encode_example(example, tokenizer, max_seq_len)
+        return -1 if encoded is None else len(encoded[0])
+
+    return sorted(examples, key=length, reverse=True)
 
 
 def compute_warmup_steps(
@@ -363,6 +417,15 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--learning-rate", type=float, default=None)
     parser.add_argument("--batch-size", type=int, default=None)
     parser.add_argument("--max-examples", type=int, default=None)
+    parser.add_argument(
+        "--longest-first",
+        nargs="?",
+        const=True,
+        default=False,
+        type=lambda value: value.lower() in ("1", "true", "yes"),
+        help="with --max-examples: take the longest examples (for the memory smoke test). "
+        "Takes an optional true/false, because SageMaker passes hyperparameters as --key value",
+    )
     parser.add_argument("--no-wandb", action="store_true")
     parser.add_argument("--no-generation-eval", action="store_true")
     return parser.parse_args()
@@ -402,6 +465,9 @@ def main() -> None:
     train_raw = read_jsonl(train_path)
     val_raw = read_jsonl(val_path)
     if args.max_examples:
+        if args.longest_first:
+            train_raw = longest_first(train_raw, tokenizer, config["max_seq_len"])
+            val_raw = longest_first(val_raw, tokenizer, config["max_seq_len"])
         train_raw = train_raw[: args.max_examples]
         val_raw = val_raw[: max(4, args.max_examples // 10)]
 
